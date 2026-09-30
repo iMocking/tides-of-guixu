@@ -1,6 +1,8 @@
 extends Node3D
 class_name GameWorld
 
+const TERRAIN_GENERATOR_SCRIPT := preload("res://scripts/world/terrain_generator.gd")
+
 var player: Player
 var _camera: Camera3D
 var _sun: DirectionalLight3D
@@ -9,10 +11,13 @@ var _world_env: WorldEnvironment
 var _environment: Environment
 var _sky_material: ProceduralSkyMaterial
 var _fireflies: GPUParticles3D
+var _terrain_generator
 var _rng := RandomNumberGenerator.new()
 var _spawn_timer := 8.0
 # Orbit camera tuning. Both camera modes share the same yaw/pitch so rotating
 # the view feels identical, they only differ in their framing presets.
+const INITIAL_ENEMY_COUNT := 12
+const RESPAWN_POSITION := Vector3(0.0, 0.0, 0.0)
 const CAMERA_PITCH_MIN := -0.25
 const CAMERA_PITCH_MAX := 1.30
 const CAMERA_DISTANCE_MIN := 6.0
@@ -35,6 +40,7 @@ var _last_camera_mode := -1
 func _ready() -> void:
     _rng.randomize()
     _build_environment()
+    _setup_terrain()
     _build_ground()
     _build_props()
     _spawn_player()
@@ -42,13 +48,18 @@ func _ready() -> void:
     _spawn_initial_enemies()
     _build_camera()
     EventBus.damage_number_requested.connect(_on_damage_number_requested)
-    EventBus.player_died.connect(_on_player_died)
     EventBus.camera_shake_requested.connect(_on_camera_shake_requested)
     EventBus.settings_changed.connect(_apply_camera_settings)
     _apply_camera_settings()
 
 func get_player() -> Player:
     return player
+
+
+func is_world_ready() -> bool:
+    if player == null or _terrain_generator == null:
+        return false
+    return _terrain_generator.get_loaded_chunk_count() > 0
 
 func _build_environment() -> void:
     _world_env = WorldEnvironment.new()
@@ -121,27 +132,23 @@ func _build_environment() -> void:
     _fireflies.position = Vector3(0.0, 5.0, 0.0)
     add_child(_fireflies)
 
+func _setup_terrain() -> void:
+    _terrain_generator = TERRAIN_GENERATOR_SCRIPT.new()
+    _terrain_generator.name = "TerrainGenerator"
+    add_child(_terrain_generator)
+    _terrain_generator.setup(_rng.randi())
+
+
+func _sample_ground_height(x: float, z: float) -> float:
+    if _terrain_generator == null:
+        return 0.0
+    return float(_terrain_generator.sample_height(x, z))
+
+
 func _build_ground() -> void:
-    var ground_body := StaticBody3D.new()
-    ground_body.name = "Ground"
-    var collision := CollisionShape3D.new()
-    var box := BoxShape3D.new()
-    box.size = Vector3(180.0, 1.0, 180.0)
-    collision.shape = box
-    ground_body.add_child(collision)
-    add_child(ground_body)
-
-    var ground_mesh := MeshInstance3D.new()
-    var plane := PlaneMesh.new()
-    plane.size = Vector2(180.0, 180.0)
-    ground_mesh.mesh = plane
-    var material := StandardMaterial3D.new()
-    material.albedo_color = Color(0.25, 0.35, 0.26)
-    material.roughness = 0.96
-    ground_mesh.material_override = material
-    ground_mesh.position = Vector3(0.0, -0.02, 0.0)
-    add_child(ground_mesh)
-
+    # TerrainGenerator supplies the streamed ground mesh and collision.  The
+    # original central dirt path remains as a cheap landmark for the flat
+    # starting area.
     var path := MeshInstance3D.new()
     var path_mesh := PlaneMesh.new()
     path_mesh.size = Vector2(8.0, 120.0)
@@ -173,6 +180,7 @@ func _build_props() -> void:
         _add_mountain(mountain_position)
 
 func _add_tree(position: Vector3) -> void:
+    position.y = _sample_ground_height(position.x, position.z)
     var trunk := MeshInstance3D.new()
     var trunk_mesh := CylinderMesh.new()
     trunk_mesh.top_radius = 0.22
@@ -197,6 +205,7 @@ func _add_tree(position: Vector3) -> void:
     add_child(canopy)
 
 func _add_rock(position: Vector3) -> void:
+    position.y = _sample_ground_height(position.x, position.z)
     var rock := MeshInstance3D.new()
     var rock_mesh := BoxMesh.new()
     var size := Vector3(_rng.randf_range(0.5, 2.1), _rng.randf_range(0.35, 1.25), _rng.randf_range(0.5, 2.1))
@@ -211,6 +220,7 @@ func _add_rock(position: Vector3) -> void:
     add_child(rock)
 
 func _add_grass(position: Vector3) -> void:
+    position.y = _sample_ground_height(position.x, position.z)
     var grass := MeshInstance3D.new()
     var quad := QuadMesh.new()
     quad.size = Vector2(_rng.randf_range(0.35, 0.65), _rng.randf_range(0.5, 0.9))
@@ -225,6 +235,7 @@ func _add_grass(position: Vector3) -> void:
     add_child(grass)
 
 func _add_mountain(position: Vector3) -> void:
+    position.y = _sample_ground_height(position.x, position.z)
     var mountain := MeshInstance3D.new()
     var mesh := CylinderMesh.new()
     mesh.top_radius = 0.0
@@ -241,7 +252,7 @@ func _add_mountain(position: Vector3) -> void:
 
 func _spawn_player() -> void:
     player = Player.new()
-    player.position = Vector3(0.0, 1.0, 0.0)
+    player.position = Vector3(0.0, _sample_ground_height(0.0, 0.0), 0.0)
     add_child(player)
 
 func _spawn_npcs() -> void:
@@ -251,19 +262,22 @@ func _spawn_npcs() -> void:
         var npc := NPC.new()
         npc.setup(str(npc_id))
         if position is Dictionary:
-            npc.position = Vector3(float(position.get("x", 6.0)), float(position.get("y", 0.0)), float(position.get("z", -7.0)))
+            npc.position = Vector3(float(position.get("x", 6.0)), 0.0, float(position.get("z", -7.0)))
+            npc.position.y = _sample_ground_height(npc.position.x, npc.position.z) + float(position.get("y", 0.0))
         add_child(npc)
 
 func _spawn_initial_enemies() -> void:
-    for i in range(12):
+    for i in range(INITIAL_ENEMY_COUNT):
         _spawn_enemy()
 
 func _spawn_enemy() -> void:
     var angle := _rng.randf_range(0.0, TAU)
     var radius := _rng.randf_range(12.0, 48.0)
+    var x := cos(angle) * radius
+    var z := sin(angle) * radius
     var enemy := Enemy.new()
     enemy.setup(GameData.random_enemy_id(GameState.realm_index, _rng), _rng)
-    enemy.position = Vector3(cos(angle) * radius, 1.0, sin(angle) * radius)
+    enemy.position = Vector3(x, _sample_ground_height(x, z), z)
     add_child(enemy)
 
 func _build_camera() -> void:
@@ -273,6 +287,8 @@ func _build_camera() -> void:
     add_child(_camera)
 
 func _process(delta: float) -> void:
+    if player != null and _terrain_generator != null:
+        _terrain_generator.update_stream(player.global_position)
     _spawn_timer -= delta
     if _spawn_timer <= 0.0:
         _spawn_timer = 24.0
@@ -357,7 +373,7 @@ func _resolve_camera_collision(origin: Vector3, desired: Vector3) -> Vector3:
             var offset := hit_position - origin
             if offset.length() > 1.0:
                 desired = origin + offset.normalized() * maxf(offset.length() - 0.4, 1.0)
-    desired.y = maxf(desired.y, 0.9)
+    desired.y = maxf(desired.y, _sample_ground_height(desired.x, desired.z) + 0.9)
     return desired
 
 ## Applies the framing preset of a camera mode, optionally resetting the yaw.
@@ -403,6 +419,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func _apply_camera_settings() -> void:
     if _camera != null:
         _camera.fov = float(GameState.settings.get("camera_fov", 55.0))
+    _apply_display_settings()
     var mode := int(GameState.settings.get("camera_mode", 0))
     if mode != _last_camera_mode:
         _last_camera_mode = mode
@@ -412,21 +429,31 @@ func _apply_camera_settings() -> void:
     else:
         Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
-func _on_camera_shake_requested(amount: float) -> void:
-    _camera_shake = maxf(_camera_shake, amount)
+## Brightness / screen filter / fog / shadows driven by the settings panel.
+func _apply_display_settings() -> void:
+    if _environment == null:
+        return
+    var preset := GameState.get_filter_preset()
+    var base_brightness := float(GameState.DEFAULT_SETTINGS.get("brightness", 1.2))
+    var user_brightness := float(GameState.settings.get("brightness", base_brightness))
+    _environment.adjustment_enabled = true
+    _environment.adjustment_saturation = float(preset[0])
+    _environment.adjustment_contrast = float(preset[1])
+    _environment.adjustment_brightness = float(preset[2]) * (user_brightness / maxf(base_brightness, 0.01))
+    _environment.fog_enabled = bool(GameState.settings.get("fog", true))
+    if _sun != null:
+        _sun.shadow_enabled = bool(GameState.settings.get("shadows", true))
 
-func _on_player_died() -> void:
-    EventBus.toast_requested.emit(LocaleData.text("player_died"), Color(0.95, 0.45, 0.40))
-    await get_tree().create_timer(3.0).timeout
-    var total := GameState.get_total_stats()
-    GameState.health = float(total["max_health"])
-    GameState.qi = float(total["max_qi"])
-    if player != null:
-        player.global_position = Vector3(0.0, 1.0, 0.0)
-    EventBus.player_stats_changed.emit()
-    EventBus.toast_requested.emit(LocaleData.text("respawn"), Color(0.70, 0.95, 0.78))
+
+func _on_camera_shake_requested(amount: float) -> void:
+    var scale := float(GameState.combat_fx_level()) / 2.0
+    if scale <= 0.0:
+        return
+    _camera_shake = maxf(_camera_shake, amount * scale)
 
 func _on_damage_number_requested(amount: float, global_position: Vector3, is_crit: bool, element: String) -> void:
+    if GameState.combat_fx_level() <= 0:
+        return
     if not bool(GameState.settings.get("show_damage_numbers", true)):
         return
     var label := Label3D.new()

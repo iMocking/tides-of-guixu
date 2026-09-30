@@ -1,5 +1,7 @@
 extends CanvasLayer
 class_name GameUI
+const GAME_MENU_SCRIPT := preload("res://scripts/ui/game_menu.gd")
+const DEATH_PANEL_SCRIPT := preload("res://scripts/ui/death_panel.gd")
 ## In-game HUD plus every popup panel (inventory, character, dialogue ...).
 
 ## Inventory cells are square (72x72): 7 per row, up to 6 rows - 42 cells - per
@@ -12,6 +14,8 @@ const INVENTORY_MAX_PAGE_CELLS := 42
 const INVENTORY_CELL := 72.0
 const INVENTORY_GAP := 8.0
 const INVENTORY_FILTERS: Array[String] = ["all", "equipment", "consumable", "material"]
+const CHARACTER_LEFT_SLOTS: Array[String] = ["weapon", "head", "body", "bracers"]
+const CHARACTER_RIGHT_SLOTS: Array[String] = ["legs", "boots", "accessory", "talisman"]
 
 var player: Player
 
@@ -40,6 +44,7 @@ var _interact_label: Label
 
 # -------------------------------------------------------------- inventory ---
 var _panel_scrim: ColorRect
+var _filter_tint: ColorRect
 var _inventory_panel: PanelContainer
 var _inventory_grid: GridContainer
 var _inventory_name: Label
@@ -68,11 +73,14 @@ var _character_header: Label
 var _char_values: Dictionary = {}
 var _char_equip_rows: Dictionary = {}
 var _char_equip_icons: Dictionary = {}
-var _char_equip_box: VBoxContainer
+var _character_preview: FashionPreview
 
 # --------------------------------------------------------------- overlays ---
 var _settings_panel: SettingsPanel
 var _achievements_panel: AchievementsPanel
+var _fashion_panel: FashionPanel
+var _game_menu: Control
+var _death_panel
 var _all_panels: Array[Control] = []
 
 # --------------------------------------------------------------- dialogue ---
@@ -98,6 +106,13 @@ func _ready() -> void:
     root.mouse_filter = Control.MOUSE_FILTER_IGNORE
     add_child(root)
 
+    _filter_tint = ColorRect.new()
+    _filter_tint.name = "FilterTint"
+    _filter_tint.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    _filter_tint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    _filter_tint.color = Color(0.0, 0.0, 0.0, 0.0)
+    root.add_child(_filter_tint)
+
     _build_hud(root)
 
     _panel_scrim = UIKit.scrim(0.6)
@@ -120,7 +135,28 @@ func _ready() -> void:
     _achievements_panel.close_requested.connect(_on_overlay_closed.bind("achievements"))
     root.add_child(_achievements_panel)
 
-    _all_panels = [_inventory_panel, _character_panel, _settings_panel, _achievements_panel, _dialogue_panel]
+    _fashion_panel = FashionPanel.new()
+    _fashion_panel.name = "fashion"
+    _fashion_panel.close_requested.connect(_on_overlay_closed.bind("fashion"))
+    root.add_child(_fashion_panel)
+
+    _game_menu = GAME_MENU_SCRIPT.new()
+    _game_menu.name = "game_menu"
+    _game_menu.connect("close_requested", _on_overlay_closed.bind("game_menu"))
+    _game_menu.connect("resume_requested", _on_game_menu_resume_requested)
+    _game_menu.connect("main_menu_requested", _on_game_menu_main_menu_requested)
+    _game_menu.connect("settings_requested", _on_game_menu_settings_requested)
+    _game_menu.connect("quit_requested", _on_game_menu_quit_requested)
+    root.add_child(_game_menu)
+
+    _death_panel = DEATH_PANEL_SCRIPT.new()
+    _death_panel.name = "death"
+    _death_panel.connect("close_requested", _on_overlay_closed.bind("death"))
+    _death_panel.connect("revive_in_place_requested", _on_revive_in_place_requested)
+    _death_panel.connect("revive_at_spawn_requested", _on_revive_at_spawn_requested)
+    root.add_child(_death_panel)
+
+    _all_panels = [_inventory_panel, _character_panel, _fashion_panel, _settings_panel, _achievements_panel, _dialogue_panel, _game_menu, _death_panel]
 
     EventBus.player_stats_changed.connect(_refresh_hud)
     EventBus.inventory_changed.connect(_refresh_inventory)
@@ -129,11 +165,14 @@ func _ready() -> void:
     EventBus.toast_requested.connect(_on_toast_requested)
     EventBus.combat_log.connect(_on_combat_log)
     EventBus.achievement_unlocked.connect(_on_achievement_unlocked)
+    EventBus.fashion_changed.connect(_on_fashion_changed)
     EventBus.settings_changed.connect(_on_settings_changed)
     EventBus.dialogue_requested.connect(_on_dialogue_requested)
     EventBus.quest_updated.connect(_on_quest_updated)
     EventBus.quest_completed.connect(_on_quest_completed)
+    EventBus.player_died.connect(_on_player_died)
 
+    _apply_screen_filter()
     _refresh_hud()
     _refresh_inventory()
     _close_panels()
@@ -184,7 +223,7 @@ func _build_hud(root: Control) -> void:
     top_right.name = "HudButtons"
     top_right.anchor_left = 1.0
     top_right.anchor_right = 1.0
-    top_right.offset_left = -260
+    top_right.offset_left = -312
     top_right.offset_right = -18
     top_right.offset_top = 18
     top_right.offset_bottom = 58
@@ -193,6 +232,7 @@ func _build_hud(root: Control) -> void:
 
     _hud_icon_button(top_right, "bag", LocaleData.text("inventory"), func() -> void: _toggle_panel(_inventory_panel, "inventory"))
     _hud_icon_button(top_right, "person", LocaleData.text("character"), func() -> void: _toggle_panel(_character_panel, "character"))
+    _hud_icon_button(top_right, "robe", LocaleData.text("fashion"), func() -> void: _toggle_panel(_fashion_panel, "fashion"))
     _hud_icon_button(top_right, "trophy", LocaleData.text("achievements"), func() -> void: _open_panel(_achievements_panel, "achievements"))
     _hud_icon_button(top_right, "gear", LocaleData.text("settings"), func() -> void: _open_panel(_settings_panel, "settings"))
 
@@ -588,7 +628,7 @@ func _build_character_panel(root: Control) -> void:
     # --------------------------------------------------- left: equipment ----
     var gear_card := PanelContainer.new()
     gear_card.theme_type_variation = "CardPanel"
-    gear_card.custom_minimum_size = Vector2(320, 0)
+    gear_card.custom_minimum_size = Vector2(470, 0)
     body.add_child(gear_card)
 
     var gear_margin := UIKit.margin_container(14, 12, 14, 12)
@@ -598,12 +638,29 @@ func _build_character_panel(root: Control) -> void:
     gear_margin.add_child(gear_column)
     gear_column.add_child(UIKit.section(LocaleData.text("section_equipment")))
 
-    _char_equip_box = UIKit.vbox(8)
-    gear_column.add_child(_char_equip_box)
-    gear_column.add_child(UIKit.spacer(false, true))
+    var equipment_row := UIKit.hbox(10)
+    equipment_row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    gear_column.add_child(equipment_row)
 
-    for slot_id in GameState.equipment.keys():
-        _char_equip_box.add_child(_make_equipment_row(str(slot_id)))
+    var left_slots := UIKit.vbox(10)
+    left_slots.alignment = BoxContainer.ALIGNMENT_CENTER
+    left_slots.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    equipment_row.add_child(left_slots)
+
+    var preview := _build_character_preview()
+    preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    equipment_row.add_child(preview)
+
+    var right_slots := UIKit.vbox(10)
+    right_slots.alignment = BoxContainer.ALIGNMENT_CENTER
+    right_slots.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    equipment_row.add_child(right_slots)
+
+    for slot_id in CHARACTER_LEFT_SLOTS:
+        left_slots.add_child(_make_equipment_row(slot_id))
+    for slot_id in CHARACTER_RIGHT_SLOTS:
+        right_slots.add_child(_make_equipment_row(slot_id))
 
     # ------------------------------------------------- right: attributes ----
     var stats_scroll := ScrollContainer.new()
@@ -633,51 +690,57 @@ func _build_character_panel(root: Control) -> void:
     _char_values["birth_pillar"] = UIKit.stat_row(destiny_grid, LocaleData.text("birth_pillar"))
     _char_values["current_pillar"] = UIKit.stat_row(destiny_grid, LocaleData.text("current_pillar"))
     _char_values["time"] = UIKit.stat_row(destiny_grid, LocaleData.text("time"))
+    _char_values["fashion"] = UIKit.stat_row(destiny_grid, LocaleData.text("fashion"))
 
-## One equipment slot: framed glyph on the left, slot + item name on the right.
-
+## One equipment slot: a square framed glyph.  The slot / item name is shown
+## as a tooltip so the Destiny-style equipment panel can stay text-free.
 func _make_equipment_row(slot_id: String) -> Control:
-    var row := UIKit.hbox(12)
-    row.name = "Slot_" + slot_id
-
     var frame := PanelContainer.new()
-    frame.theme_type_variation = "CardPanel"
-    frame.custom_minimum_size = Vector2(50, 50)
-    frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
-    row.add_child(frame)
+    frame.name = "Slot_" + slot_id
+    frame.custom_minimum_size = Vector2(64, 64)
+    frame.mouse_filter = Control.MOUSE_FILTER_STOP
+    frame.add_theme_stylebox_override("panel", ThemeBuilder.flat_box(ThemeBuilder.BG_SLOT, ThemeBuilder.BORDER_MUTED, 8, 1))
+    frame.tooltip_text = GameData.slot_name(slot_id) + "\n" + LocaleData.text("equipment_empty")
 
-    var slot_icon := UiIcon.new(_slot_glyph(slot_id), ThemeBuilder.JADE_DIM, 1.7)
-    slot_icon.glyph_size = 27.0
+    var slot_icon := UiIcon.new(_slot_glyph(slot_id), ThemeBuilder.JADE_DIM, 1.8)
+    slot_icon.glyph_size = 38.0
     frame.add_child(slot_icon)
 
-    var text_box := UIKit.vbox(2)
-    text_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    text_box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-    row.add_child(text_box)
-
-    text_box.add_child(UIKit.hint(GameData.slot_name(slot_id)))
-    var item_label := UIKit.value(LocaleData.text("equipment_empty"))
-    item_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    item_label.add_theme_color_override("font_color", ThemeBuilder.TEXT_MUTED)
-    text_box.add_child(item_label)
-
-    _char_equip_rows[slot_id] = item_label
+    _char_equip_rows[slot_id] = frame
     _char_equip_icons[slot_id] = slot_icon
-    return row
+    return frame
+
 
 func _slot_glyph(slot_id: String) -> String:
     match slot_id:
         "weapon":
-            return "sword"
+            return "slot_weapon"
         "head":
-            return "head"
+            return "slot_head"
         "body":
-            return "body"
+            return "slot_body"
+        "legs":
+            return "slot_legs"
+        "boots":
+            return "slot_boots"
+        "bracers":
+            return "slot_bracers"
         "accessory":
-            return "accessory"
+            return "slot_accessory"
         "talisman":
-            return "talisman"
-    return "bag"
+            return "slot_talisman"
+    return "slot_body"
+
+
+## The equipment panel reuses the wardrobe mirror, so the preview always shows
+## the same body, outfit and weapon as the world does.
+func _build_character_preview() -> Control:
+    _character_preview = FashionPreview.new()
+    _character_preview.custom_minimum_size = Vector2(190, 330)
+    _character_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    _character_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    return _character_preview
+
 
 func _build_dialogue_panel(root: Control) -> void:
     _dialogue_panel = PanelContainer.new()
@@ -807,22 +870,41 @@ func _refresh_character_panel() -> void:
     _char_values["birth_pillar"].text = GameState.get_birth_text()
     _char_values["current_pillar"].text = str(GameState.get_pillars().get("text", ""))
     _char_values["time"].text = GameState.get_time_string()
-    for slot_id in _char_equip_rows.keys():
-        var item_label: Label = _char_equip_rows[slot_id]
+    _char_values["fashion"].text = _fashion_text()
+    for slot_id in _char_equip_icons.keys():
         var item_id := str(GameState.equipment.get(slot_id, ""))
         var slot_icon: UiIcon = _char_equip_icons.get(slot_id)
+        var frame: Control = _char_equip_rows.get(slot_id)
         if item_id == "":
-            item_label.text = LocaleData.text("equipment_empty")
-            item_label.add_theme_color_override("font_color", ThemeBuilder.TEXT_MUTED)
             if slot_icon != null:
-                slot_icon.setup(_slot_glyph(slot_id), ThemeBuilder.JADE_DIM, 1.7)
+                slot_icon.setup(_slot_glyph(str(slot_id)), ThemeBuilder.JADE_DIM, 1.8)
+            if frame != null:
+                frame.tooltip_text = GameData.slot_name(str(slot_id)) + "\n" + LocaleData.text("equipment_empty")
         else:
             var item_color := GameData.item_color(item_id)
-            item_label.text = GameData.item_name(item_id)
-            item_label.add_theme_color_override("font_color", item_color)
             if slot_icon != null:
-                # Equipped slot shows the item's own icon, not just the slot type.
-                slot_icon.setup(GameData.item_icon(item_id), item_color, 1.7)
+                slot_icon.setup(GameData.item_icon(item_id), item_color, 2.0)
+            if frame != null:
+                frame.tooltip_text = GameData.slot_name(str(slot_id)) + "\n" + GameData.item_name(item_id)
+        if frame is PanelContainer:
+            var border := ThemeBuilder.BORDER_MUTED if item_id == "" else GameData.item_color(item_id)
+            (frame as PanelContainer).add_theme_stylebox_override("panel", ThemeBuilder.flat_box(ThemeBuilder.BG_SLOT, border, 8, 1))
+    if _character_preview != null:
+        _character_preview.set_appearance(GameState.fashion_appearance())
+        _character_preview.set_weapon(str(GameState.equipment.get("weapon", "")))
+
+## The wardrobe row on the character sheet only needs a refresh while it is
+## actually on screen - the rest of the HUD is unaffected by cosmetics.
+func _on_fashion_changed() -> void:
+    if _character_panel != null and _character_panel.visible:
+        _refresh_character_panel()
+
+
+func _fashion_text() -> String:
+    if GameState.fashion_worn == "":
+        return LocaleData.text("fashion_none")
+    return FashionData.name(GameState.fashion_worn)
+
 
 func _refresh_inventory() -> void:
     if _inventory_grid == null:
@@ -1022,7 +1104,14 @@ func _refresh_inventory_detail() -> void:
     var item_stats: Variant = item.get("stats", {})
     if item_stats is Dictionary:
         for key in item_stats.keys():
-            lines.append("%s %s" % [LocaleData.text(str(key)), _format_stat_value(item_stats[key])])
+            lines.append("%s %s" % [LocaleData.text(str(key)), _format_stat_value(item_stats[key], str(key))])
+    var set_id := str(item.get("set", ""))
+    if set_id != "":
+        var equipped_pieces := GameState.get_equipped_set_count(set_id)
+        var total_pieces := GameData.set_total_pieces(set_id)
+        lines.append("%s (%d/%d)" % [GameData.equipment_set_name(set_id), equipped_pieces, total_pieces])
+        for bonus_line in GameData.set_bonus_lines(set_id, equipped_pieces):
+            lines.append(bonus_line)
     _inventory_stats.text = "\n".join(lines)
     _use_button.disabled = type_id != "consumable"
     _equip_button.disabled = type_id != "equipment"
@@ -1030,11 +1119,18 @@ func _refresh_inventory_detail() -> void:
 
 ## Signed stat read-out so penalties show as "-0.4" instead of "+-0.4".
 
-func _format_stat_value(value: Variant) -> String:
+func _format_stat_value(value: Variant, stat_key := "") -> String:
+    match stat_key:
+        "crit_chance", "crit_damage":
+            return "%+.1f%%" % (float(value) * 100.0)
+        "move_speed":
+            return "%+.2f" % float(value)
     if value is int:
         return "%+d" % int(value)
     if value is float:
-        return "%+.1f" % float(value)
+        if is_equal_approx(float(value), roundf(float(value))):
+            return "%+d" % int(round(float(value)))
+        return "%+.2f" % float(value)
     return str(value)
 
 func _selected_slot_data() -> Dictionary:
@@ -1095,6 +1191,7 @@ func _cast_from_ui(skill_id: String) -> void:
     player._cast_skill(skill_id)
 
 func _process(delta: float) -> void:
+    # The equipment mirror spins itself whenever it is visible (FashionPreview).
     if _toast_timer > 0.0:
         _toast_timer = maxf(0.0, _toast_timer - delta)
         if _toast_panel != null:
@@ -1122,6 +1219,8 @@ func _process(delta: float) -> void:
     _update_interact_hint()
 
 func _unhandled_input(event: InputEvent) -> void:
+    if _death_panel != null and _death_panel.visible:
+        return
     if _dialogue_panel != null and _dialogue_panel.visible:
         var awaiting_choice := _dialogue_accept.visible or _dialogue_decline.visible
         if not awaiting_choice and event.is_action_pressed("ui_accept"):
@@ -1134,17 +1233,26 @@ func _unhandled_input(event: InputEvent) -> void:
     elif event.is_action_pressed("toggle_character"):
         _toggle_panel(_character_panel, "character")
         get_viewport().set_input_as_handled()
+    elif event.is_action_pressed("toggle_fashion"):
+        _toggle_panel(_fashion_panel, "fashion")
+        get_viewport().set_input_as_handled()
     elif event.is_action_pressed("toggle_achievements"):
         if _achievements_panel.visible:
             _close_panels()
         else:
             _open_panel(_achievements_panel, "achievements")
         get_viewport().set_input_as_handled()
-    elif event.is_action_pressed("toggle_settings"):
-        if _any_panel_visible():
+    elif event.is_action_pressed("toggle_game_menu"):
+        if _game_menu.visible and _game_menu.is_closing():
+            # A second quick press cancels the close animation and reopens the
+            # menu instead of being swallowed by the closing state.
+            _open_panel(_game_menu, "game_menu")
+        elif _game_menu.visible:
+            _close_panels()
+        elif _any_panel_visible():
             _close_panels()
         else:
-            _open_panel(_settings_panel, "settings")
+            _open_panel(_game_menu, "game_menu")
         get_viewport().set_input_as_handled()
 
 # ================================================================ panels =====
@@ -1225,16 +1333,67 @@ func _on_overlay_closed(panel_name: String) -> void:
     EventBus.ui_panel_toggled.emit(panel_name, false)
     _sync_pause()
 
+func _on_game_menu_resume_requested() -> void:
+    _close_panels()
+
+func _on_game_menu_main_menu_requested() -> void:
+    GameState.save_game()
+    EventBus.return_to_main_menu_requested.emit()
+
+func _on_game_menu_settings_requested() -> void:
+    _open_panel(_settings_panel, "settings")
+
+func _on_game_menu_quit_requested() -> void:
+    GameState.save_game()
+    EventBus.quit_game_requested.emit()
+
+
+func _on_player_died() -> void:
+    _open_panel(_death_panel, "death")
+
+
+func _on_revive_in_place_requested() -> void:
+    if GameState.count_item("consumable_huanhun") <= 0:
+        _death_panel.call("refresh")
+        return
+    if not GameState.remove_item("consumable_huanhun", 1):
+        _death_panel.call("refresh")
+        return
+    if player != null:
+        player.revive_in_place()
+    _close_panels()
+    EventBus.toast_requested.emit(LocaleData.text("revive_success"), Color(0.72, 0.95, 0.78))
+
+
+func _on_revive_at_spawn_requested() -> void:
+    if player != null:
+        player.revive_at_spawn(GameWorld.RESPAWN_POSITION)
+    _close_panels()
+    EventBus.toast_requested.emit(LocaleData.text("revive_at_spawn_success"), Color(0.72, 0.90, 1.0))
+
 # ============================================================== quests =======
 
 func _on_time_changed(_pillars: Dictionary) -> void:
     _refresh_hud()
 
 func _on_settings_changed() -> void:
+    _apply_screen_filter()
     _refresh_hud()
+
+
+## Colour-grading overlay that matches the chosen screen filter preset.
+func _apply_screen_filter() -> void:
+    if _filter_tint == null:
+        return
+    var preset := GameState.get_filter_preset()
+    _filter_tint.color = preset[3]
 
 func _refresh_quest_label() -> void:
     if _quest_label == null:
+        return
+    if not bool(GameState.settings.get("quest_tracker", true)):
+        _quest_label.text = ""
+        _quest_panel.hide()
         return
     var quest := GameState.get_tracked_quest()
     if quest.is_empty():

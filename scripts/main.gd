@@ -1,8 +1,14 @@
 extends Node
 ## Application root: switches between the main menu and the playable world.
 
+const LOADING_SCREEN_SCRIPT := preload("res://scripts/ui/loading_screen.gd")
+
 func _ready() -> void:
     _configure_window()
+    if not EventBus.return_to_main_menu_requested.is_connected(_show_main_menu):
+        EventBus.return_to_main_menu_requested.connect(_show_main_menu)
+    if not EventBus.quit_game_requested.is_connected(_quit_game):
+        EventBus.quit_game_requested.connect(_quit_game)
     _show_main_menu()
     if OS.get_cmdline_user_args().has("--auto-start"):
         call_deferred("_start_new_game")
@@ -26,24 +32,56 @@ func _show_main_menu() -> void:
 
 func _start_new_game() -> void:
     GameState.start_new_game()
-    _start_world()
+    await _enter_world()
+
 
 func _continue_game() -> void:
     if not GameState.load_game():
         _show_main_menu()
         return
-    _start_world()
+    await _enter_world()
 
-func _start_world() -> void:
+
+func _enter_world() -> void:
     _clear_screen()
+    var loading = LOADING_SCREEN_SCRIPT.new()
+    loading.name = "LoadingScreen"
+    add_child(loading)
+    loading.set_progress(0.05, LocaleData.text("loading_data"))
+    await get_tree().process_frame
+    loading.set_progress(0.15, LocaleData.text("loading_data"))
+    await get_tree().process_frame
+
+    # Touch the item/enemy tables the world will read during spawning.
+    var _preload_probe := GameData.item_row("set_shaoxia_weapon").size() + GameData.ENEMIES.size()
+    loading.set_progress(0.30, LocaleData.text("loading_world"))
+    await get_tree().process_frame
+
     var world := GameWorld.new()
     world.name = "GameWorld"
     add_child(world)
+    await get_tree().process_frame
+    loading.set_progress(0.65, LocaleData.text("loading_entities"))
+    await get_tree().process_frame
+
     var ui := GameUI.new()
     ui.name = "GameUI"
     add_child(ui)
     await get_tree().process_frame
     ui.set_player(world.get_player())
+
+    var waited := 0
+    while (not world.is_world_ready() or get_tree().get_nodes_in_group("enemies").size() < GameWorld.INITIAL_ENEMY_COUNT) and waited < 180:
+        await get_tree().process_frame
+        waited += 1
+
+    loading.set_progress(0.90, LocaleData.text("loading_finalize"))
+    await get_tree().process_frame
+    loading.set_progress(1.0, LocaleData.text("loading_ready"))
+    await get_tree().create_timer(0.12).timeout
+    loading.queue_free()
+    get_tree().paused = false
+    Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 func _quit_game() -> void:
     get_tree().quit()

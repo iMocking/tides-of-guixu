@@ -49,6 +49,7 @@ func _ready() -> void:
         _rng.randomize()
     _build_body()
     _update_label()
+    EventBus.settings_changed.connect(_update_label)
 
 func _build_body() -> void:
     var collision := CollisionShape3D.new()
@@ -56,29 +57,49 @@ func _build_body() -> void:
     capsule.radius = 0.46
     capsule.height = 1.5
     collision.shape = capsule
+    collision.position = Vector3(0.0, 0.75, 0.0)
     add_child(collision)
 
     var mesh_instance := MeshInstance3D.new()
-    var mesh := CapsuleMesh.new()
-    mesh.radius = 0.46
-    mesh.height = 1.5
-    mesh_instance.mesh = mesh
+    var model := _load_mesh("res://assets/models/characters/enemy_base.obj")
+    if model != null:
+        mesh_instance.mesh = model
+        mesh_instance.rotation_degrees.y = 180.0
+    else:
+        var mesh := CapsuleMesh.new()
+        mesh.radius = 0.46
+        mesh.height = 1.5
+        mesh_instance.mesh = mesh
     var material := StandardMaterial3D.new()
     material.albedo_color = color
     material.roughness = 0.8
+    material.cull_mode = BaseMaterial3D.CULL_DISABLED
     mesh_instance.material_override = material
     add_child(mesh_instance)
 
     var label := Label3D.new()
     label.name = "NameLabel"
-    label.position = Vector3(0.0, 1.35, 0.0)
+    label.position = Vector3(0.0, 2.05, 0.0)
     ThemeBuilder.style_world_label(label, 28, Color(1.0, 0.88, 0.72))
     add_child(label)
 
+
+
+func _load_mesh(path: String) -> Mesh:
+    if not ResourceLoader.exists(path):
+        return null
+    var resource := load(path)
+    if resource is Mesh:
+        return resource as Mesh
+    return null
+
+
 func _update_label() -> void:
     var label := get_node_or_null("NameLabel") as Label3D
-    if label != null:
-        label.text = "%s  %d/%d" % [enemy_name, int(health), int(max_health)]
+    if label == null:
+        return
+    label.visible = bool(GameState.settings.get("enemy_health_bars", true))
+    label.text = "%s  %d/%d" % [enemy_name, int(health), int(max_health)]
 
 func _physics_process(delta: float) -> void:
     if health <= 0.0:

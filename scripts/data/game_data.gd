@@ -1,4 +1,5 @@
 class_name GameData
+const EQUIPMENT_DATA := preload("res://scripts/data/equipment_data.gd")
 ## Core game data: five elements, sexagenary cycle, realms, items, skills, enemies and achievements.
 
 const ELEMENT_IDS: Array[String] = ["metal", "wood", "water", "fire", "earth"]
@@ -91,6 +92,10 @@ const ITEMS := {
         "type": "material", "rarity": 1, "stackable": true, "max_stack": 9999, "color": "#a7d8e6",
         "element": "metal", "value": 1,
     },
+    "consumable_huanhun": {
+        "type": "consumable", "rarity": 3, "stackable": true, "max_stack": 20, "color": "#d8b4ff",
+        "element": "none", "value": 320, "revive_only": true, "use_effect": {},
+    },
     "talisman_fire": {
         "type": "consumable", "rarity": 2, "stackable": true, "max_stack": 20, "color": "#f06b45",
         "element": "fire", "value": 35, "use_effect": {"aoe_damage": 55.0, "radius": 4.0},
@@ -152,6 +157,8 @@ const ACHIEVEMENTS := [
     {"id": "damage_10000", "stat": "damage_dealt", "target": 10000.0},
     {"id": "collector_20", "stat": "items_collected", "target": 20.0},
     {"id": "skill_cast_50", "stat": "skills_cast", "target": 50.0},
+    {"id": "fashion_3", "stat": "fashion_owned", "target": 3.0},
+    {"id": "fashion_all", "special": "fashion_complete", "target": 1.0},
 ]
 
 static func element_name(element: String) -> String:
@@ -272,17 +279,26 @@ static func realm_next_xp(index: int) -> float:
     return float(REALMS[index + 1]["xp"])
 
 static func item(id: String) -> Dictionary:
-    var data: Dictionary = ITEMS.get(id, {}).duplicate(true)
-    if not data.is_empty():
+    var data: Dictionary = item_row(id).duplicate(true)
+    if data.is_empty():
+        return {}
+    if not data.has("name"):
         data["name"] = LocaleData.text("item_" + id)
+    if not data.has("desc"):
         data["desc"] = LocaleData.text("item_desc_" + id)
+    var set_id := str(data.get("set", ""))
+    if set_id != "":
+        data["set_name"] = EQUIPMENT_DATA.equipment_set_name(set_id)
     return data
 
 static func item_name(id: String) -> String:
+    var row := item_row(id)
+    if row.has("name"):
+        return str(row["name"])
     return LocaleData.text("item_" + id)
 
 static func item_color(id: String) -> Color:
-    var data: Dictionary = ITEMS.get(id, {})
+    var data := item_row(id)
     return Color(str(data.get("color", "#777777")))
 
 static func rarity_color(rarity: int) -> Color:
@@ -300,20 +316,21 @@ static func rarity_color(rarity: int) -> Color:
 
 ## Icon glyph used by the inventory / equipment cells for every item id.
 const ITEM_ICONS := {
-    "weapon_qingfeng": "sword",
-    "weapon_xuantie": "sword",
-    "armor_buyi": "body",
-    "armor_lingjia": "body",
-    "accessory_yupei": "accessory",
-    "accessory_fu": "talisman",
+    "weapon_qingfeng": "slot_weapon",
+    "weapon_xuantie": "slot_weapon",
+    "armor_buyi": "slot_body",
+    "armor_lingjia": "slot_body",
+    "accessory_yupei": "slot_accessory",
+    "accessory_fu": "slot_accessory",
     "consumable_jinchuang": "potion",
     "consumable_huiqi": "potion",
     "consumable_juling": "potion",
     "consumable_xiaohun": "potion",
+    "consumable_huanhun": "potion",
     "material_lingcao": "wood",
     "material_yaodan": "orb",
     "material_jingshi": "metal",
-    "talisman_fire": "talisman",
+    "talisman_fire": "slot_talisman",
 }
 
 
@@ -328,15 +345,21 @@ static func item_icon(id: String) -> String:
     var row := item_row(id)
     match str(row.get("slot", "")):
         "weapon":
-            return "sword"
+            return "slot_weapon"
         "head":
-            return "head"
+            return "slot_head"
         "body":
-            return "body"
+            return "slot_body"
+        "legs":
+            return "slot_legs"
+        "boots":
+            return "slot_boots"
+        "bracers":
+            return "slot_bracers"
         "accessory":
-            return "accessory"
+            return "slot_accessory"
         "talisman":
-            return "talisman"
+            return "slot_talisman"
     match str(row.get("type", "")):
         "consumable":
             return "potion"
@@ -346,10 +369,38 @@ static func item_icon(id: String) -> String:
 
 ## Raw item table row (no localization) - used by inventory sorting/filtering.
 static func item_row(id: String) -> Dictionary:
-    var row: Variant = ITEMS.get(id, {})
-    if row is Dictionary:
+    var row: Variant = ITEMS.get(id)
+    if row is Dictionary and not (row as Dictionary).is_empty():
         return row
-    return {}
+    return EQUIPMENT_DATA.item_row(id)
+
+
+static func item_set_id(id: String) -> String:
+    return str(item_row(id).get("set", ""))
+
+
+static func equipment_set_name(set_id: String) -> String:
+    return EQUIPMENT_DATA.equipment_set_name(set_id)
+
+
+static func set_flavor(set_id: String) -> String:
+    return EQUIPMENT_DATA.set_flavor(set_id)
+
+
+static func set_total_pieces(set_id: String) -> int:
+    return EQUIPMENT_DATA.set_total_pieces(set_id)
+
+
+static func set_piece_ids(set_id: String) -> Array:
+    return EQUIPMENT_DATA.set_piece_ids(set_id)
+
+
+static func set_bonus_stats(set_id: String, equipped_pieces: int) -> Dictionary:
+    return EQUIPMENT_DATA.set_bonus_stats(set_id, equipped_pieces)
+
+
+static func set_bonus_lines(set_id: String, equipped_pieces: int) -> Array[String]:
+    return EQUIPMENT_DATA.set_bonus_lines(set_id, equipped_pieces)
 
 
 ## Inventory filter category: equipment / consumable / material.
@@ -399,14 +450,15 @@ static func random_enemy_id(player_realm: int, rng: RandomNumberGenerator) -> St
     return ENEMY_SPAWN_TABLE[rng.randi_range(0, max_tier - 1)]
 
 static func starting_items() -> Array:
-    return [
-        {"id": "weapon_qingfeng", "count": 1},
-        {"id": "armor_buyi", "count": 1},
-        {"id": "consumable_jinchuang", "count": 5},
-        {"id": "consumable_huiqi", "count": 3},
-        {"id": "material_lingcao", "count": 3},
-        {"id": "material_jingshi", "count": 50},
-    ]
+    var result: Array = []
+    for piece_id in EQUIPMENT_DATA.set_piece_ids("shaoxia"):
+        result.append({"id": str(piece_id), "count": 1})
+    result.append({"id": "consumable_jinchuang", "count": 5})
+    result.append({"id": "consumable_huiqi", "count": 3})
+    result.append({"id": "consumable_huanhun", "count": 1})
+    result.append({"id": "material_lingcao", "count": 3})
+    result.append({"id": "material_jingshi", "count": 50})
+    return result
 
 static func roll_loot(level: int, rng: RandomNumberGenerator) -> Array:
     var drops := []
@@ -425,7 +477,33 @@ static func roll_loot(level: int, rng: RandomNumberGenerator) -> Array:
             drops.append({"id": "consumable_huiqi", "count": 1})
     if rng.randf() < 0.08:
         drops.append({"id": "accessory_yupei", "count": 1})
+    if rng.randf() < 0.035:
+        drops.append({"id": "consumable_huanhun", "count": 1})
+    if rng.randf() < _set_drop_chance(level):
+        var set_id := _random_set_for_level(level, rng)
+        var pieces := EQUIPMENT_DATA.set_piece_ids(set_id)
+        if not pieces.is_empty():
+            drops.append({"id": str(pieces[rng.randi_range(0, pieces.size() - 1)]), "count": 1})
     return drops
+
+
+static func _set_drop_chance(level: int) -> float:
+    return clampf(0.04 + float(level) * 0.012, 0.04, 0.18)
+
+
+static func _random_set_for_level(level: int, rng: RandomNumberGenerator) -> String:
+    var pool: Array[String] = ["shaoxia"]
+    if level >= 2:
+        pool.append("qingfeng")
+    if level >= 3:
+        pool.append("qinggang")
+    if level >= 5:
+        pool.append("taowu")
+        pool.append("baize")
+    if level >= 7:
+        pool.append("hongmeng")
+        pool.append("zhulong")
+    return pool[rng.randi_range(0, pool.size() - 1)]
 
 static func _gregorian_to_jdn(year: int, month: int, day: int) -> int:
     var a := int((14 - month) / 12.0)

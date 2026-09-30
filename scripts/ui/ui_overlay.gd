@@ -19,6 +19,8 @@ var show_footer_close := true
 var _scrim: ColorRect
 var _center: CenterContainer
 var _closing := false
+var _open_tween: Tween
+var _close_tween: Tween
 
 func _ready() -> void:
     process_mode = Node.PROCESS_MODE_ALWAYS
@@ -28,20 +30,59 @@ func _ready() -> void:
     _build_shell()
     _build_content()
     _finish_shell()
+    if not get_viewport().size_changed.is_connected(_on_viewport_resized):
+        get_viewport().size_changed.connect(_on_viewport_resized)
     visible = false
 
 func open() -> void:
-    if visible and not _closing:
-        _on_open()
-        return
+    var was_closing := _closing
+    _kill_tween(_close_tween)
     _closing = false
-    _on_open()
+
+    var already_open := visible and not was_closing
     visible = true
+    _on_open()
+    if already_open:
+        return
+
+    # Opening from hidden: start from the pop-in pose. Reopening while a close
+    # animation is still running: continue from its current values so there
+    # is no visual jump.
+    if not was_closing:
+        if _scrim != null:
+            _scrim.modulate.a = 0.0
+        if window != null:
+            window.scale = Vector2(0.96, 0.96)
+            window.modulate.a = 1.0
+    _play_open_animation()
+
+
+func _play_open_animation() -> void:
+    _kill_tween(_open_tween)
+    _open_tween = create_tween()
+    _open_tween.set_parallel(true)
     if _scrim != null:
-        _scrim.modulate.a = 0.0
-        var tween := create_tween()
-        tween.tween_property(_scrim, "modulate:a", 1.0, 0.15)
-    UIKit.pop_in(window)
+        _open_tween.tween_property(_scrim, "modulate:a", 1.0, 0.15)
+    if window != null:
+        window.pivot_offset = _window_pivot()
+        _open_tween.tween_property(window, "scale", Vector2.ONE, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+        _open_tween.tween_property(window, "modulate:a", 1.0, 0.12)
+
+
+func _kill_tween(tween: Tween) -> void:
+    if tween != null and tween.is_valid():
+        tween.kill()
+
+
+func _window_pivot() -> Vector2:
+    if window == null:
+        return Vector2.ZERO
+    var target := window.size
+    if target.x <= 0.0:
+        target.x = window.custom_minimum_size.x
+    if target.y <= 0.0:
+        target.y = window.custom_minimum_size.y
+    return target * 0.5
 
 func close() -> void:
     _request_close()
@@ -60,7 +101,7 @@ func _build_shell() -> void:
     _center.mouse_filter = Control.MOUSE_FILTER_IGNORE
     add_child(_center)
 
-    var shell := UIKit.build_modal(_modal_title(), _modal_size(), _modal_icon())
+    var shell := UIKit.build_modal(_modal_title(), _fit_modal_size(_modal_size()), _modal_icon())
     window = shell.root
     header = shell.header
     content = shell.content
@@ -74,25 +115,60 @@ func _finish_shell() -> void:
         close_button.pressed.connect(_request_close)
         footer.add_child(close_button)
 
+## Re-fits the window whenever the (logical) viewport changes, e.g. after the
+## UI-scale slider or a window resize.
+func _on_viewport_resized() -> void:
+    if window == null:
+        return
+    var fitted := _fit_modal_size(_modal_size())
+    if window.custom_minimum_size != fitted:
+        window.custom_minimum_size = fitted
+        window.pivot_offset = fitted * 0.5
+
+
+## Never let a window grow past the viewport - a large UI scale on a small
+## window used to push the header/footer off screen.
+func _fit_modal_size(size_hint: Vector2) -> Vector2:
+    var view_size := get_viewport_rect().size
+    return Vector2(
+        minf(size_hint.x, maxf(view_size.x - 32.0, 320.0)),
+        minf(size_hint.y, maxf(view_size.y - 32.0, 240.0))
+    )
+
+
 func _request_close() -> void:
     if _closing:
         return
     _closing = true
+    _kill_tween(_open_tween)
     AudioManager.play_ui_click()
     _on_close()
     close_requested.emit()
-    if _scrim != null and _scrim.is_inside_tree():
-        var tween := create_tween()
-        tween.set_parallel(true)
-        tween.tween_property(_scrim, "modulate:a", 0.0, 0.12)
-        tween.chain().tween_callback(_after_close)
-    else:
+
+    _kill_tween(_close_tween)
+    if not is_inside_tree():
         _after_close()
-    UIKit.pop_out(window)
+        return
+    _close_tween = create_tween()
+    _close_tween.set_parallel(true)
+    if _scrim != null:
+        _close_tween.tween_property(_scrim, "modulate:a", 0.0, 0.12)
+    if window != null:
+        window.pivot_offset = _window_pivot()
+        _close_tween.tween_property(window, "scale", Vector2(0.97, 0.97), 0.12)
+        _close_tween.tween_property(window, "modulate:a", 0.0, 0.12)
+    _close_tween.chain().tween_callback(_after_close)
+
 
 func _after_close() -> void:
     _closing = false
     visible = false
+    _close_tween = null
+    if window != null:
+        window.scale = Vector2.ONE
+        window.modulate.a = 1.0
+    if _scrim != null:
+        _scrim.modulate.a = 1.0
 
 func _on_scrim_gui_input(event: InputEvent) -> void:
     if not close_on_scrim_click:

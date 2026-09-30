@@ -5,6 +5,7 @@ signal toast_requested(text: String, color: Color)
 signal player_stats_changed
 signal inventory_changed
 signal equipment_changed
+signal fashion_changed
 signal time_changed(pillars: Dictionary)
 signal achievement_unlocked(achievement: Dictionary)
 signal enemy_defeated(enemy_id: String, global_position: Vector3)
@@ -14,6 +15,8 @@ signal realm_changed(realm_index: int)
 signal game_started
 signal game_loaded
 signal game_saved
+signal return_to_main_menu_requested
+signal quit_game_requested
 signal player_died
 signal settings_changed
 signal camera_shake_requested(amount: float)

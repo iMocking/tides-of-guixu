@@ -101,6 +101,22 @@ func _run_glyph() -> void:
             _glyph_accessory()
         "talisman":
             _glyph_talisman()
+        "slot_weapon":
+            _glyph_slot_weapon()
+        "slot_head":
+            _glyph_slot_head()
+        "slot_body":
+            _glyph_slot_body()
+        "slot_legs":
+            _glyph_slot_legs()
+        "slot_boots":
+            _glyph_slot_boots()
+        "slot_bracers":
+            _glyph_slot_bracers()
+        "slot_accessory":
+            _glyph_slot_accessory()
+        "slot_talisman":
+            _glyph_slot_talisman()
         "heart":
             _glyph_heart()
         "drop":
@@ -131,6 +147,12 @@ func _run_glyph() -> void:
             _glyph_metal()
         "earth":
             _glyph_earth()
+        "robe":
+            _glyph_robe()
+        "palette":
+            _glyph_palette()
+        "sparkle":
+            _glyph_sparkle()
         _:
             _ring(Vector2(12.0, 12.0), 8.0)
 
@@ -202,6 +224,91 @@ func _glyph_talisman() -> void:
         Vector2(12.0, 6.2), Vector2(10.0, 9.2), Vector2(14.2, 12.6),
         Vector2(10.4, 15.6), Vector2(12.0, 18.4),
     ]), false, 0.85)
+
+func _glyph_slot_weapon() -> void:
+    _path(PackedVector2Array([
+        Vector2(12.0, 2.2), Vector2(14.0, 6.0), Vector2(12.9, 15.0),
+        Vector2(11.1, 15.0), Vector2(10.0, 6.0),
+    ]))
+    _line(Vector2(7.4, 16.0), Vector2(16.6, 16.0), 1.0)
+    _line(Vector2(12.0, 16.0), Vector2(12.0, 19.8))
+    _dot(Vector2(12.0, 21.0), 1.25)
+    _arc(Vector2(7.1, 16.0), 1.9, -PI * 0.5, PI * 0.5, 0.65)
+    _arc(Vector2(16.9, 16.0), 1.9, PI * 0.5, PI * 1.5, 0.65)
+    _line(Vector2(9.2, 12.8), Vector2(14.8, 12.8), 0.6)
+
+
+func _glyph_slot_head() -> void:
+    _path(PackedVector2Array([
+        Vector2(5.2, 15.4), Vector2(6.2, 7.6), Vector2(9.2, 4.2),
+        Vector2(14.8, 4.2), Vector2(17.8, 7.6), Vector2(18.8, 15.4),
+        Vector2(16.0, 19.4), Vector2(8.0, 19.4),
+    ]))
+    _line(Vector2(5.2, 15.4), Vector2(18.8, 15.4), 0.8)
+    _dot(Vector2(12.0, 9.8), 1.35)
+    _arc(Vector2(8.8, 13.1), 2.4, PI * 1.12, PI * 1.88, 0.65)
+    _arc(Vector2(15.2, 13.1), 2.4, PI * 1.12, PI * 1.88, 0.65)
+
+
+func _glyph_slot_body() -> void:
+    _path(PackedVector2Array([
+        Vector2(8.2, 3.8), Vector2(12.0, 6.0), Vector2(15.8, 3.8),
+        Vector2(18.6, 7.0), Vector2(16.2, 10.2), Vector2(16.2, 20.6),
+        Vector2(7.8, 20.6), Vector2(7.8, 10.2), Vector2(5.4, 7.0),
+    ]))
+    _line(Vector2(12.0, 8.0), Vector2(12.0, 20.0), 0.7)
+    _line(Vector2(9.6, 13.0), Vector2(14.4, 13.0), 0.6)
+
+
+func _glyph_slot_legs() -> void:
+    _path(PackedVector2Array([
+        Vector2(8.0, 3.6), Vector2(16.0, 3.6), Vector2(16.8, 20.6),
+        Vector2(13.2, 20.6), Vector2(12.0, 11.8), Vector2(10.8, 20.6),
+        Vector2(7.2, 20.6),
+    ]))
+    _line(Vector2(12.0, 4.2), Vector2(12.0, 10.8), 0.7)
+    _line(Vector2(8.8, 8.0), Vector2(15.2, 8.0), 0.6)
+
+
+func _glyph_slot_boots() -> void:
+    _path(PackedVector2Array([
+        Vector2(5.6, 5.0), Vector2(11.0, 5.0), Vector2(11.0, 12.4),
+        Vector2(17.4, 12.4), Vector2(19.0, 16.0), Vector2(19.0, 19.6), Vector2(5.6, 19.6),
+    ]))
+    _line(Vector2(5.6, 16.8), Vector2(11.0, 16.8), 0.7)
+    _line(Vector2(11.0, 5.0), Vector2(11.0, 12.4), 0.7)
+
+
+func _glyph_slot_bracers() -> void:
+    _path(PackedVector2Array([
+        Vector2(7.8, 3.8), Vector2(16.2, 3.8), Vector2(17.8, 8.0),
+        Vector2(16.0, 12.0), Vector2(17.0, 20.4), Vector2(7.0, 20.4),
+        Vector2(8.0, 12.0), Vector2(6.2, 8.0),
+    ]))
+    _line(Vector2(8.0, 8.0), Vector2(16.0, 8.0), 0.7)
+    _line(Vector2(8.0, 16.0), Vector2(16.0, 16.0), 0.7)
+
+
+func _glyph_slot_accessory() -> void:
+    _ring(Vector2(12.0, 8.8), 5.2)
+    _ring(Vector2(12.0, 8.8), 2.3, 0.8)
+    _line(Vector2(12.0, 14.1), Vector2(12.0, 18.6))
+    _path(PackedVector2Array([
+        Vector2(9.8, 16.2), Vector2(12.0, 20.6), Vector2(14.2, 16.2),
+    ]), true, 0.9)
+
+
+func _glyph_slot_talisman() -> void:
+    _path(PackedVector2Array([
+        Vector2(7.6, 3.2), Vector2(16.4, 3.2), Vector2(16.4, 20.8), Vector2(7.6, 20.8),
+    ]))
+    _line(Vector2(12.0, 6.0), Vector2(12.0, 18.0), 0.55)
+    _path(PackedVector2Array([
+        Vector2(12.0, 6.2), Vector2(10.0, 9.2), Vector2(14.2, 12.6),
+        Vector2(10.4, 15.6), Vector2(12.0, 18.0),
+    ]), false, 0.85)
+    _dot(Vector2(12.0, 20.1), 1.05)
+
 
 func _glyph_heart() -> void:
     _path(PackedVector2Array([
@@ -332,3 +439,32 @@ func _glyph_earth() -> void:
         Vector2(12.0, 12.6), Vector2(15.8, 10.2), Vector2(18.6, 5.4),
         Vector2(13.4, 6.4), Vector2(12.0, 12.6),
     ]))
+## Fashion: a hanging robe with a waist sash.
+func _glyph_robe() -> void:
+    _path(PackedVector2Array([
+        Vector2(9.2, 3.6), Vector2(14.8, 3.6), Vector2(20.4, 8.4), Vector2(17.6, 12.2),
+        Vector2(16.6, 9.6), Vector2(17.2, 20.4), Vector2(6.8, 20.4), Vector2(7.4, 9.6),
+        Vector2(6.4, 12.2), Vector2(3.6, 8.4),
+    ]))
+    _line(Vector2(9.2, 3.6), Vector2(12.0, 6.4), 0.8)
+    _line(Vector2(14.8, 3.6), Vector2(12.0, 6.4), 0.8)
+    _line(Vector2(7.6, 12.8), Vector2(16.4, 12.8), 0.7)
+
+
+## Dye: a painter's palette with a few colour wells.
+func _glyph_palette() -> void:
+    _ring(Vector2(12.0, 12.0), 8.2)
+    _dot(Vector2(9.9, 8.4), 1.7)
+    _dot(Vector2(15.3, 9.4), 1.7)
+    _dot(Vector2(15.0, 15.0), 1.7)
+    _dot(Vector2(9.3, 14.3), 1.7)
+
+
+## Aura: a four-point sparkle with two satellites.
+func _glyph_sparkle() -> void:
+    _path(PackedVector2Array([
+        Vector2(12.0, 2.8), Vector2(13.6, 10.4), Vector2(21.2, 12.0), Vector2(13.6, 13.6),
+        Vector2(12.0, 21.2), Vector2(10.4, 13.6), Vector2(2.8, 12.0), Vector2(10.4, 10.4),
+    ]))
+    _dot(Vector2(18.8, 5.2), 1.5)
+    _dot(Vector2(5.4, 18.6), 1.2)

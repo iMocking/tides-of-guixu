@@ -2,6 +2,8 @@ class_name WorldFX
 ## Lightweight procedural VFX helpers built from meshes and particles.
 
 static func spawn_aoe_ring(parent: Node, world_position: Vector3, color: Color, radius: float, duration: float = 0.5) -> void:
+    if GameState.combat_fx_level() <= 0:
+        return
     var ring := MeshInstance3D.new()
     var torus := TorusMesh.new()
     torus.inner_radius = 0.42
@@ -25,6 +27,8 @@ static func spawn_aoe_ring(parent: Node, world_position: Vector3, color: Color, 
     tween.chain().tween_callback(ring.queue_free)
 
 static func spawn_hit_spark(parent: Node, world_position: Vector3, color: Color, strength: float = 1.0) -> void:
+    if GameState.combat_fx_level() <= 0:
+        return
     var particles := GPUParticles3D.new()
     particles.amount = maxi(8, int(16.0 * strength))
     particles.lifetime = 0.5
@@ -51,6 +55,8 @@ static func spawn_hit_spark(parent: Node, world_position: Vector3, color: Color,
     timer.timeout.connect(particles.queue_free)
 
 static func add_projectile_trail(projectile: Node3D, color: Color) -> void:
+    if GameState.combat_fx_level() <= 0:
+        return
     var particles := GPUParticles3D.new()
     particles.amount = 28
     particles.lifetime = 0.35
@@ -72,6 +78,8 @@ static func add_projectile_trail(projectile: Node3D, color: Color) -> void:
     projectile.add_child(particles)
 
 static func spawn_dash_trail(parent: Node, from_position: Vector3, to_position: Vector3, color: Color) -> void:
+    if GameState.combat_fx_level() <= 0:
+        return
     var distance := from_position.distance_to(to_position)
     var steps := maxi(3, int(distance / 1.2))
     for i in range(steps + 1):

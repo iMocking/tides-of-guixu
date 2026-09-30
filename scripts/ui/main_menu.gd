@@ -165,7 +165,7 @@ func _version_text() -> String:
     return "《%s》  ·  Godot 4.7 prototype" % LocaleData.text("game_title")
 
 func _footer_text() -> String:
-    return "WASD 移动   ·   左键普攻   ·   Q / E 或右键拖拽转视角   ·   R 重置视角   ·   滚轮缩放   ·   V 切换视角   ·   Tab 行囊   ·   C 角色   ·   K 成就   ·   Esc 设置"
+    return "WASD 移动   ·   左键普攻   ·   Q / E 或右键拖拽转视角   ·   R 重置视角   ·   滚轮缩放   ·   V 切换视角   ·   Tab 行囊   ·   C 角色   ·   K 成就   ·   Esc 菜单"
 
 func _play_intro() -> void:
     modulate.a = 0.0
