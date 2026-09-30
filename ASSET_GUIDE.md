@@ -25,6 +25,12 @@
 - `assets/audio/sfx/`：脚步、挥剑、技能、拾取、升级、UI 点击。
 - `assets/ui/`：面板边框、按钮、图标、字体。
 
+## 界面文案与默认道号
+界面文案集中在 `scripts/data/locale_data.gd` → `locale_extra.gd` → `locale_extra2.gd` → `locale_extra3.gd`
+四张表里（后者是前者的回退），改文案只要改对应键即可。默认道号是 `default_player_name`
+（当前为「陈梦飞」）；若再次更换默认名，把 `GameState.LEGACY_DEFAULT_PLAYER_NAME` 指向上一版默认名，
+旧存档就会在下次读档时自动升级。
+
 ## 玩家角色模型（骨骼动画）
 `assets/models/characters/player_animated.glb` 是当前玩家角色：137 骨骼 + 9 段动作，由 `CharacterModel` 装载。
 替换成自己的角色时，按下列约定即可少改代码：

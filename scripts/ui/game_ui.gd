@@ -69,8 +69,11 @@ var _inventory_filter_buttons: Dictionary = {}
 
 # -------------------------------------------------------------- character ---
 var _character_panel: PanelContainer
-var _character_header: Label
 var _char_values: Dictionary = {}
+var _char_identity_icons: Dictionary = {}
+## Column holding the identity / attributes / destiny sections, kept so the
+## order the sections are laid out in stays testable.
+var _character_stats: VBoxContainer
 var _char_equip_rows: Dictionary = {}
 var _char_equip_icons: Dictionary = {}
 var _character_preview: FashionPreview
@@ -616,9 +619,6 @@ func _build_character_panel(root: Control) -> void:
     header.add_child(UIKit.spacer(true, false))
     header.add_child(UIKit.close_button(_close_panels))
 
-    _character_header = UIKit.label("", "SectionLabel")
-    column.add_child(_character_header)
-
     column.add_child(UIKit.separator())
 
     var body := UIKit.hbox(16)
@@ -647,10 +647,15 @@ func _build_character_panel(root: Control) -> void:
     left_slots.size_flags_vertical = Control.SIZE_EXPAND_FILL
     equipment_row.add_child(left_slots)
 
-    var preview := _build_character_preview()
-    preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
-    equipment_row.add_child(preview)
+    var preview_column := UIKit.vbox(2)
+    preview_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    preview_column.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    equipment_row.add_child(preview_column)
+
+    preview_column.add_child(_build_character_preview())
+    var preview_hint := UIKit.hint(LocaleData.text("drag_to_rotate"))
+    preview_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    preview_column.add_child(preview_hint)
 
     var right_slots := UIKit.vbox(10)
     right_slots.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -672,7 +677,32 @@ func _build_character_panel(root: Control) -> void:
     var stats := UIKit.vbox(12)
     stats.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     stats_scroll.add_child(stats)
+    _character_stats = stats
 
+    # ---------------------------------------------------- identity -------
+    # Name, realm and spiritual root lead the column, above the numbers.
+    var identity_body := UIKit.section_header(stats, LocaleData.text("section_identity"))
+    var identity_card := PanelContainer.new()
+    identity_card.name = "IdentityCard"
+    identity_card.theme_type_variation = "CardPanelAccent"
+    identity_body.add_child(identity_card)
+
+    var identity_margin := UIKit.margin_container(14, 12, 14, 12)
+    identity_card.add_child(identity_margin)
+
+    var identity_column := UIKit.vbox(10)
+    identity_margin.add_child(identity_column)
+    identity_column.add_child(_make_identity_name_row())
+
+    var identity_grid := UIKit.grid(2, 24, 8)
+    identity_column.add_child(identity_grid)
+    _char_values["realm"] = _make_identity_stat(identity_grid, "realm", LocaleData.text("realm"), "star")
+    _char_values["element"] = _make_identity_stat(identity_grid, "element", LocaleData.text("element"), "wood")
+
+    identity_column.add_child(UIKit.separator())
+    identity_column.add_child(_make_identity_fashion_row())
+
+    # -------------------------------------------------- attributes -------
     var attribute_grid := UIKit.grid(2, 28, 10)
     UIKit.section_header(stats, LocaleData.text("section_attributes")).add_child(attribute_grid)
     _char_values["health"] = UIKit.stat_row(attribute_grid, LocaleData.text("health"), "", "heart")
@@ -682,15 +712,69 @@ func _build_character_panel(root: Control) -> void:
     _char_values["move_speed"] = UIKit.stat_row(attribute_grid, LocaleData.text("move_speed"), "", "speed")
     _char_values["crit_chance"] = UIKit.stat_row(attribute_grid, LocaleData.text("crit_chance"), "", "star")
 
+    # Name / realm / root moved into the identity card, so this section keeps
+    # the cultivation and calendar half of the old grid.
     var destiny_grid := UIKit.grid(2, 28, 10)
     UIKit.section_header(stats, LocaleData.text("section_destiny")).add_child(destiny_grid)
-    _char_values["realm"] = UIKit.stat_row(destiny_grid, LocaleData.text("realm"))
-    _char_values["element"] = UIKit.stat_row(destiny_grid, LocaleData.text("element"))
     _char_values["cultivation"] = UIKit.stat_row(destiny_grid, LocaleData.text("cultivation"))
     _char_values["birth_pillar"] = UIKit.stat_row(destiny_grid, LocaleData.text("birth_pillar"))
     _char_values["current_pillar"] = UIKit.stat_row(destiny_grid, LocaleData.text("current_pillar"))
     _char_values["time"] = UIKit.stat_row(destiny_grid, LocaleData.text("time"))
-    _char_values["fashion"] = UIKit.stat_row(destiny_grid, LocaleData.text("fashion"))
+
+## Identity card of the character sheet: the name is the headline, the realm /
+## spiritual root sit under it and the worn outfit closes the block.
+func _make_identity_name_row() -> Control:
+    var row := UIKit.hbox(8)
+    var glyph := UIKit.icon("person", 20.0, ThemeBuilder.GOLD_DIM, 1.8)
+    glyph.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+    row.add_child(glyph)
+    row.add_child(UIKit.label(LocaleData.text("player_name"), "StatLabel"))
+    row.add_child(UIKit.spacer(true, false))
+    var value := UIKit.label("", "GoldValueLabel")
+    value.add_theme_font_size_override("font_size", 21)
+    value.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+    row.add_child(value)
+    _char_values["player_name"] = value
+    return row
+
+
+## Realm / spiritual root entry.  The glyph is kept around because the
+## spiritual root is rolled per character and the icon has to follow it.
+func _make_identity_stat(grid_node: GridContainer, key: String, label_text: String, glyph_id: String) -> Label:
+    var name_row := UIKit.hbox(8)
+    var glyph := UIKit.icon(glyph_id, 18.0, ThemeBuilder.JADE_DIM, 1.7)
+    glyph.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+    name_row.add_child(glyph)
+    name_row.add_child(UIKit.label(label_text, "StatLabel"))
+    grid_node.add_child(name_row)
+
+    var value := UIKit.label("", "ValueLabel")
+    value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+    value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    grid_node.add_child(value)
+    _char_identity_icons[key] = glyph
+    return value
+
+
+func _make_identity_fashion_row() -> Control:
+    var row := UIKit.hbox(8)
+    var glyph := UIKit.icon("robe", 18.0, ThemeBuilder.JADE_DIM, 1.7)
+    glyph.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+    row.add_child(glyph)
+    row.add_child(UIKit.label(LocaleData.text("fashion"), "StatLabel"))
+    row.add_child(UIKit.spacer(true, false))
+    var value := UIKit.label("", "ValueLabel")
+    row.add_child(value)
+    _char_values["fashion"] = value
+    return row
+
+
+## UiIcon glyph of a spiritual root - the element ids double as glyph ids.
+func _element_glyph(element: String) -> String:
+    if GameData.ELEMENT_IDS.has(element):
+        return element
+    return "star"
+
 
 ## One equipment slot: a square framed glyph.  The slot / item name is shown
 ## as a tooltip so the Destiny-style equipment panel can stay text-free.
@@ -739,6 +823,8 @@ func _build_character_preview() -> Control:
     _character_preview.custom_minimum_size = Vector2(190, 330)
     _character_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _character_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    # The sheet holds the model still; the player turns it by hand.
+    _character_preview.auto_spin = false
     return _character_preview
 
 
@@ -847,7 +933,7 @@ func _refresh_hud() -> void:
         if cultivation_label != null:
             cultivation_label.text = "%d / %d" % [int(_cultivation_bar.value), int(_cultivation_bar.max_value)]
 
-    _time_label.text = GameState.get_time_string()
+    _time_label.text = GameState.get_calendar_text()
     _pip_label.text = GameState.get_element_relation_text()
     if _character_panel != null and _character_panel.visible:
         _refresh_character_panel()
@@ -857,20 +943,29 @@ func _refresh_character_panel() -> void:
     if _char_values.is_empty():
         return
     var total := GameState.get_total_stats()
-    _character_header.text = "%s   %s   %s" % [GameState.player_name, GameState.get_realm_name(), GameState.get_element_name()]
+
+    # ---------------------------------------------------- identity ------
+    _char_values["player_name"].text = GameState.player_name
+    _char_values["realm"].text = GameState.get_realm_name()
+    _char_values["element"].text = GameState.get_element_name()
+    _char_values["fashion"].text = _fashion_text()
+    var element_icon: UiIcon = _char_identity_icons.get("element")
+    if element_icon != null:
+        element_icon.setup(_element_glyph(GameState.player_element), GameData.element_icon_color(GameState.player_element), 1.7)
+
+    # -------------------------------------------------- attributes ------
     _char_values["health"].text = "%d / %d" % [int(GameState.health), int(total["max_health"])]
     _char_values["qi"].text = "%d / %d" % [int(GameState.qi), int(total["max_qi"])]
     _char_values["attack"].text = "%d" % int(total["attack"])
     _char_values["defense"].text = "%d" % int(total["defense"])
     _char_values["move_speed"].text = "%.1f" % float(total["move_speed"])
     _char_values["crit_chance"].text = "%.1f%%" % (float(total["crit_chance"]) * 100.0)
-    _char_values["realm"].text = GameState.get_realm_name()
-    _char_values["element"].text = GameState.get_element_name()
+
+    # ----------------------------------------------------- destiny ------
     _char_values["cultivation"].text = GameState.get_cultivation_text()
     _char_values["birth_pillar"].text = GameState.get_birth_text()
     _char_values["current_pillar"].text = str(GameState.get_pillars().get("text", ""))
-    _char_values["time"].text = GameState.get_time_string()
-    _char_values["fashion"].text = _fashion_text()
+    _char_values["time"].text = GameState.get_calendar_text()
     for slot_id in _char_equip_icons.keys():
         var item_id := str(GameState.equipment.get(slot_id, ""))
         var slot_icon: UiIcon = _char_equip_icons.get(slot_id)

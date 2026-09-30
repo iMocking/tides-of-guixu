@@ -211,11 +211,111 @@ static func element_relationship(attacker: String, defender: String) -> String:
         return "overcome_by"
     return "neutral"
 
+# ---------------------------------------------------------------- calendar --
+## The world dates its own way: the clock the game keeps internally is a plain
+## Gregorian one, and this turns it into the in-world calendar line
+## "归墟七十七年腊月十五 辰时三刻".
+##
+## The era counts from Gregorian 1949, so the default start year (2025) reads
+## 归墟七十七年.  Months use the lunar-style names (正月 ... 冬月 / 腊月) and days use
+## the 初一 / 十五 / 廿一 convention.  A 时辰 is split into eight 15-minute 刻,
+## numbered 一刻 .. 八刻, so 辰时三刻 is the quarter that starts at 07:30.
+
+const ERA_EPOCH := 1949
+const NUMERALS: Array[String] = ["〇", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
+const HUNDRED := "百"
+## Placeholder zero between units, as in 一百零五.
+const ZERO := "零"
+const QUARTER_MINUTES := 15
+const QUARTERS_PER_HOUR_PILLAR := 8
+
+
+static func era_year(year: int) -> int:
+    return year - ERA_EPOCH + 1
+
+
+## Chinese numeral used by the calendar: 一 ... 十, 十一, 二十, 七十七,
+## 一百零五, 一百一十, 二百三十一 ...  Values of 1000 and above fall back to
+## plain digits; the world clock will never get there.
+static func numeral(value: int) -> String:
+    var v := value
+    if v <= 0:
+        return NUMERALS[0]
+    if v < 10:
+        return NUMERALS[v]
+    if v == 10:
+        return NUMERALS[10]
+    if v < 20:
+        return NUMERALS[10] + NUMERALS[v - 10]
+    if v < 100:
+        var tens := NUMERALS[int(v / 10.0)] + NUMERALS[10]
+        var ones := v % 10
+        if ones > 0:
+            tens += NUMERALS[ones]
+        return tens
+    if v < 1000:
+        var hundreds := NUMERALS[int(v / 100.0)] + HUNDRED
+        var rest := v % 100
+        if rest == 0:
+            return hundreds
+        if rest < 10:
+            return hundreds + ZERO + NUMERALS[rest]            # 一百零五
+        if rest < 20:
+            return hundreds + NUMERALS[1] + numeral(rest)      # 一百一十 / 一百一十五
+        return hundreds + numeral(rest)                        # 一百二十三
+    return str(v)
+
+
+static func month_name(month: int) -> String:
+    return LocaleData.text("month_%d" % clampi(month, 1, 12))
+
+
+static func day_name(day: int) -> String:
+    var d := clampi(day, 1, 31)
+    if d <= 10:
+        return LocaleData.text("day_prefix_early") + numeral(d)      # 初一 .. 初十
+    if d < 20 or d == 20 or d >= 30:
+        return numeral(d)                                            # 十一 .. 二十, 三十, 三十一
+    return LocaleData.text("day_prefix_late") + numeral(d - 20)      # 廿一 .. 廿九
+
+
+## Minutes into the current 时辰.  A 时辰 covers two clock hours and starts on an
+## odd hour, so 辰时 runs 07:00 - 08:59.
+static func minutes_into_hour_pillar(hour: int, minute: int) -> int:
+    return posmod(hour + 1, 2) * 60 + clampi(minute, 0, 59)
+
+
+## 0 .. 7 for the eight 刻 of the 时辰.
+static func quarter_index(hour: int, minute: int) -> int:
+    var index := minutes_into_hour_pillar(hour, minute) / QUARTER_MINUTES
+    return clampi(index, 0, QUARTERS_PER_HOUR_PILLAR - 1)
+
+
+static func quarter_name(hour: int, minute: int) -> String:
+    return numeral(quarter_index(hour, minute) + 1) + LocaleData.text("quarter_unit")
+
+
+## "归墟七十七年腊月十五 辰时三刻"
+static func calendar_text(calendar: Dictionary) -> String:
+    var hour := int(calendar.get("hour", 0))
+    var minute := int(calendar.get("minute", 0))
+    return "%s%s%s%s%s %s%s" % [
+        LocaleData.text("era_name"),
+        numeral(era_year(int(calendar.get("year", 2025)))),
+        LocaleData.text("year_unit"),
+        month_name(int(calendar.get("month", 1))),
+        day_name(int(calendar.get("day", 1))),
+        hour_name(hour),
+        quarter_name(hour, minute),
+    ]
+
+
 static func hour_branch_index(hour: int) -> int:
     return posmod(int(floor((hour + 1) / 2.0)), 12)
 
+## "辰时" - the branch plus the hour unit (not the "时辰" label).
 static func hour_name(hour: int) -> String:
-    return branch_name(hour_branch_index(hour)) + LocaleData.text("time")
+    return branch_name(hour_branch_index(hour)) + LocaleData.text("hour_unit")
 
 static func stem_name(index: int) -> String:
     return LocaleData.text("stem_%d" % posmod(index, 10))

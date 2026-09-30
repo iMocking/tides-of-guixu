@@ -2,6 +2,9 @@ extends Node
 ## Global game state: character, inventory, equipment, achievements, calendar and save data.
 
 const SAVE_PATH := "user://tides_of_guixu_save.json"
+## Default name used before 陈梦飞 was introduced; saves still carrying it
+## are upgraded on load (see load_game).
+const LEGACY_DEFAULT_PLAYER_NAME := "无名散修"
 const SETTINGS_PATH := "user://tides_of_guixu_settings.cfg"
 const INVENTORY_SIZE := 40
 
@@ -956,6 +959,13 @@ func _days_in_month(year: int, month: int) -> int:
 func get_pillars() -> Dictionary:
     return GameData.get_pillars(int(game_time["year"]), int(game_time["month"]), int(game_time["day"]), int(game_time["hour"]))
 
+## In-world calendar line, e.g. "归墟七十七年腊月十五 辰时三刻".
+func get_calendar_text() -> String:
+    return GameData.calendar_text(game_time)
+
+
+## Raw clock the game keeps internally ("2025-03-01 09:00"), kept for
+## debugging and save inspection - the UI shows get_calendar_text().
 func get_time_string() -> String:
     return "%04d-%02d-%02d %02d:%02d" % [int(game_time["year"]), int(game_time["month"]), int(game_time["day"]), int(game_time["hour"]), int(game_time["minute"])]
 
@@ -1128,6 +1138,10 @@ func load_game() -> bool:
         return false
     var data: Dictionary = parsed
     player_name = str(data.get("player_name", player_name))
+    # Nothing ever let the player rename the character, so a save still on the
+    # old placeholder name is upgraded to the new default.
+    if player_name == LEGACY_DEFAULT_PLAYER_NAME:
+        player_name = LocaleData.text("default_player_name")
     player_element = str(data.get("player_element", player_element))
     var loaded_birth: Variant = data.get("birth_pillar", {})
     if loaded_birth is Dictionary:

@@ -34,12 +34,16 @@ func _run_tests() -> void:
     _test_state()
     print("== fashion persistence ==")
     _test_persistence()
+    print("== world calendar ==")
+    _test_calendar()
     print("== fashion visuals ==")
     _test_visuals()
     print("== character model ==")
     await _test_character_model()
     print("== player integration ==")
     await _test_player()
+    print("== mirror rotation ==")
+    await _test_mirror_rotation()
     print("== wardrobe panel ==")
     await _test_panel()
     print("== game ui integration ==")
@@ -70,6 +74,19 @@ func check(condition: bool, message: String) -> void:
     _checks += 1
     if not condition:
         _failures.append(message)
+
+
+## Titles of the UIKit.section_header() rows inside a column, in layout order.
+func _section_titles(column: Node) -> Array[String]:
+    var titles: Array[String] = []
+    if column == null:
+        return titles
+    for child in column.get_children():
+        for grandchild in child.get_children():
+            if grandchild is Label:
+                titles.append((grandchild as Label).text)
+                break
+    return titles
 
 
 ## Bind-pose bounds of the collected body meshes, in world space.
@@ -174,6 +191,10 @@ func _test_data() -> void:
 # ----------------------------------------------------------------- state ---
 func _test_state() -> void:
     GameState.start_new_game()
+    check(LocaleData.text("default_player_name") == "陈梦飞", "the default character name is 陈梦飞")
+    check(GameState.player_name == "陈梦飞", "a new character is named 陈梦飞")
+    # The clock starts at Gregorian 2025-03-01 09:00.
+    check(GameState.get_calendar_text() == "归墟七十七年三月初一 巳时一刻", "the opening date reads 归墟七十七年三月初一 巳时一刻 (got %s)" % GameState.get_calendar_text())
     check(GameState.fashion_owned_count() == FashionData.STARTER_OWNED.size(), "a new character owns the starter outfits")
     check(GameState.fashion_worn == "", "a new character wears no fashion")
     check(int(GameState.stats.get("fashion_owned", -1)) == GameState.fashion_owned_count(), "fashion_owned stat mirrors the collection")
@@ -257,6 +278,14 @@ func _test_persistence() -> void:
     check(str(appearance.get("id", "")) == "liuyun", "the appearance is rebuilt after loading")
     check(str(appearance.get("aura", "x")) == "none", "the disabled aura stays off after loading")
 
+    # A save still carrying the pre-陈梦飞 placeholder name is upgraded.
+    _write_save({"player_name": GameState.LEGACY_DEFAULT_PLAYER_NAME})
+    check(GameState.load_game(), "an old save still loads")
+    check(GameState.player_name == "陈梦飞", "the old placeholder name is upgraded")
+    _write_save({"player_name": "无名剑客"})
+    check(GameState.load_game(), "a renamed save still loads")
+    check(GameState.player_name == "无名剑客", "a name the player chose is kept")
+
     # A save written before the fashion system existed.
     _write_save({"player_name": "legacy", "inventory": [], "equipment": {}})
     check(GameState.load_game(), "a legacy save still loads")
@@ -277,6 +306,49 @@ func _test_persistence() -> void:
     check(GameState.fashion_worn == "", "an unknown worn outfit falls back to none")
     check(GameState.get_fashion_palette("suxin") == FashionData.palette_count("suxin") - 1, "an out-of-range dye index is clamped")
     check(not GameState.get_fashion_aura_enabled("suxin"), "a stored aura toggle is kept")
+
+
+# -------------------------------------------------------------- calendar ---
+func _test_calendar() -> void:
+    # 归墟28年 is the default start year (Gregorian 2025).
+    check(GameData.era_year(1949) == 1, "the era starts in 1949")
+    check(GameData.era_year(2025) == 77, "the default start year is 归墟七十七年")
+    check(GameData.era_year(2026) == 78, "the era year advances with the clock")
+
+    var numerals := {0: "〇", 1: "一", 9: "九", 10: "十", 11: "十一", 15: "十五", 19: "十九",
+        20: "二十", 21: "二十一", 29: "二十九", 30: "三十", 31: "三十一", 40: "四十",
+        77: "七十七", 99: "九十九", 100: "一百", 105: "一百零五", 110: "一百一十", 123: "一百二十三"}
+    for value in numerals.keys():
+        check(GameData.numeral(int(value)) == numerals[value], "numeral(%d) = %s (got %s)" % [int(value), numerals[value], GameData.numeral(int(value))])
+
+    var days := {1: "初一", 9: "初九", 10: "初十", 11: "十一", 15: "十五", 19: "十九",
+        20: "二十", 21: "廿一", 29: "廿九", 30: "三十", 31: "三十一"}
+    for day in days.keys():
+        check(GameData.day_name(int(day)) == days[day], "day %d reads %s (got %s)" % [int(day), days[day], GameData.day_name(int(day))])
+
+    check(GameData.month_name(1) == "正月", "the first month is 正月")
+    check(GameData.month_name(11) == "冬月", "the eleventh month is 冬月")
+    check(GameData.month_name(12) == "腊月", "the twelfth month is 腊月")
+    check(GameData.month_name(0) == "正月" and GameData.month_name(13) == "腊月", "month names are clamped")
+
+    check(GameData.hour_name(7) == "辰时", "07:00 is 辰时")
+    check(GameData.hour_name(8) == "辰时", "08:00 is still 辰时")
+    check(GameData.hour_name(9) == "巳时", "09:00 is 巳时")
+    check(GameData.hour_name(0) == "子时", "midnight is 子时")
+
+    # 刻: eight 15-minute quarters numbered 一刻 .. 八刻.
+    check(GameData.quarter_name(7, 0) == "一刻", "辰时 opens with 一刻")
+    check(GameData.quarter_name(7, 15) == "二刻", "07:15 is 二刻")
+    check(GameData.quarter_name(7, 30) == "三刻", "07:30 is 辰时三刻")
+    check(GameData.quarter_name(7, 45) == "四刻", "07:45 is 四刻")
+    check(GameData.quarter_name(8, 45) == "八刻", "08:45 closes 辰时 with 八刻")
+    check(GameData.quarter_name(9, 0) == "一刻", "the quarters restart with the next 时辰")
+
+    var sample := {"year": 2025, "month": 12, "day": 15, "hour": 7, "minute": 30}
+    var rendered := GameData.calendar_text(sample)
+    check(rendered == "归墟七十七年腊月十五 辰时三刻", "the calendar line reads 归墟七十七年腊月十五 辰时三刻 (got %s)" % rendered)
+    check(GameState.get_calendar_text().begins_with("归墟"), "the game state renders the era name")
+    check(GameState.get_calendar_text().length() >= 10, "the game state renders a full calendar line")
 
 
 # --------------------------------------------------------------- visuals ---
@@ -473,6 +545,23 @@ func _test_game_ui() -> void:
     check(ui._all_panels.has(ui._fashion_panel), "the wardrobe panel is registered with the panel manager")
     check(ui._char_values.has("fashion"), "the character sheet has a fashion row")
     check(ui._character_preview != null, "the character sheet embeds the wardrobe mirror")
+    check(not ui._character_preview.auto_spin, "the character sheet model does not spin on its own")
+    check(ui._character_preview.mouse_filter == Control.MOUSE_FILTER_STOP, "the character sheet model takes mouse input for dragging")
+
+    # Name / realm / root live in an identity block above the attributes.
+    check(ui._char_values.has("player_name"), "the character sheet shows the character name")
+    check(ui._char_values["player_name"].text == GameState.player_name, "the identity card shows the name")
+    check(ui._char_values["realm"].text == GameState.get_realm_name(), "the identity card shows the realm")
+    check(ui._char_values["element"].text == GameState.get_element_name(), "the identity card shows the spiritual root")
+    check(ui._char_values["time"].text == GameState.get_calendar_text(), "the time row shows the in-world calendar (%s)" % ui._char_values["time"].text)
+    check(ui._char_values["time"].text.begins_with("归墟"), "the calendar row starts with the era name")
+    check(ui._time_label.text == GameState.get_calendar_text(), "the HUD footer shows the same calendar line")
+    var sections := _section_titles(ui._character_stats)
+    check(sections.size() == 3, "the character sheet has three sections (got %s)" % str(sections))
+    if sections.size() == 3:
+        check(sections[0] == LocaleData.text("section_identity"), "identity leads the column")
+        check(sections[1] == LocaleData.text("section_attributes"), "base attributes follow the identity")
+        check(sections[2] == LocaleData.text("section_destiny"), "destiny stays last")
 
     var hotkey := InputEventAction.new()
     hotkey.action = "toggle_fashion"
@@ -491,8 +580,87 @@ func _test_game_ui() -> void:
     ui._refresh_character_panel()
     check(ui._char_values["fashion"].text == LocaleData.text("fashion_none"), "the character sheet reports no outfit")
 
+    # Lay the sheet out for real and check the visual order on screen.
+    ui._open_panel(ui._character_panel, "character")
+    await get_tree().process_frame
+    await get_tree().process_frame
+    var rows: Array[Control] = []
+    for child in ui._character_stats.get_children():
+        if child is HBoxContainer:
+            rows.append(child)
+    check(rows.size() == 3, "three section headers are laid out (got %d)" % rows.size())
+    if rows.size() == 3:
+        var y0 := rows[0].global_position.y
+        var y1 := rows[1].global_position.y
+        var y2 := rows[2].global_position.y
+        # The headless window is a 64x64 dummy, so only relative positions mean
+        # anything here; the section spacing proves the sheet really laid out.
+        print("      section y: %.1f / %.1f / %.1f" % [y0, y1, y2])
+        check(y0 < y1 and y1 < y2, "sections stack top to bottom (%.1f / %.1f / %.1f)" % [y0, y1, y2])
+        check(y1 - y0 > 40.0 and y2 - y1 > 40.0, "sections are spaced out instead of collapsed")
+        check(y2 < ui._character_panel.global_position.y + ui._character_panel.size.y, "destiny stays inside the panel")
+        var card := ui._character_panel.find_child("IdentityCard", true, false) as Control
+        check(card != null, "the identity card is part of the sheet")
+        if card != null:
+            check(card.size.x > 100.0 and card.size.y > 60.0, "the identity card has a real size (%s)" % str(card.size))
+            check(card.global_position.y >= y0, "the identity card follows its own header")
+            check(card.global_position.y + card.size.y <= y1, "the identity block ends above the base attributes")
+
     ui.queue_free()
     player.queue_free()
+
+
+# ------------------------------------------------------- mirror rotation ---
+func _test_mirror_rotation() -> void:
+    var mirror := FashionPreview.new()
+    get_tree().root.add_child(mirror)
+    await get_tree().process_frame
+    check(mirror._stage != null, "the mirror builds its 3D stage")
+    if mirror._stage == null:
+        mirror.queue_free()
+        return
+
+    # Auto-spin on - the wardrobe mirror turns by itself.
+    mirror.auto_spin = true
+    var spin_from := mirror._yaw
+    mirror._process(0.5)
+    check(not is_equal_approx(mirror._yaw, spin_from), "the mirror turns on its own while auto_spin is on")
+    check(is_equal_approx(mirror._stage.rotation_degrees.y, mirror._yaw), "the stage follows the yaw")
+
+    # Auto-spin off - the character sheet holds the pose.
+    mirror.auto_spin = false
+    var held := mirror._yaw
+    mirror._process(0.5)
+    check(is_equal_approx(mirror._yaw, held), "the model holds still while auto_spin is off")
+
+    # Manual drag with the left button.
+    var press := InputEventMouseButton.new()
+    press.button_index = MOUSE_BUTTON_LEFT
+    press.pressed = true
+    mirror._on_gui_input(press)
+    check(mirror._dragging, "pressing the left button starts a drag")
+    var motion := InputEventMouseMotion.new()
+    motion.relative = Vector2(50.0, 0.0)
+    mirror._on_gui_input(motion)
+    var expected := wrapf(held + 50.0 * FashionPreview.DRAG_SENSITIVITY, 0.0, 360.0)
+    check(is_equal_approx(mirror._yaw, expected), "dragging 50 px turns the model %.1f degrees (got %.1f / %.1f)" % [50.0 * FashionPreview.DRAG_SENSITIVITY, mirror._yaw, expected])
+    check(is_equal_approx(mirror._stage.rotation_degrees.y, expected), "the stage follows the drag")
+
+    var release := InputEventMouseButton.new()
+    release.button_index = MOUSE_BUTTON_LEFT
+    release.pressed = false
+    mirror._on_gui_input(release)
+    check(not mirror._dragging, "releasing the button ends the drag")
+
+    # A drag only pauses the auto-spin; it comes back after the delay.
+    mirror.auto_spin = true
+    var paused := mirror._yaw
+    mirror._process(1.0)
+    check(is_equal_approx(mirror._yaw, paused), "the mirror stays put right after a drag")
+    mirror._process(FashionPreview.AUTO_SPIN_RESUME_DELAY)
+    mirror._process(0.5)
+    check(not is_equal_approx(mirror._yaw, paused), "the mirror resumes turning after the pause")
+    mirror.queue_free()
 
 
 # -------------------------------------------------------------- wardrobe ---

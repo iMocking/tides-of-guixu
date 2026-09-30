@@ -8,20 +8,34 @@ class_name FashionPreview
 ## in here touches saved state.
 
 const SPIN_SPEED := 22.0
+## Degrees of yaw per pixel dragged.
+const DRAG_SENSITIVITY := 0.55
+## How long the mirror waits after a drag before turning on its own again.
+const AUTO_SPIN_RESUME_DELAY := 3.0
 
 var _viewport: SubViewport
 var _stage: Node3D
 var _character: CharacterModel
 var _rig: Node3D
+## Whether the model turns by itself.  Switched off for the character sheet,
+## where the player turns it by hand instead.
+var auto_spin := true
+
 var _appearance: Dictionary = {}
 var _applied := false
 var _time := 0.0
-var _angle := 0.0
+## Yaw of the model, in degrees.
+var _yaw := 0.0
+var _dragging := false
+var _spin_pause := 0.0
 
 
 func _ready() -> void:
-    mouse_filter = Control.MOUSE_FILTER_IGNORE
+    # The model is turned by dragging, so the mirror takes mouse input.
+    mouse_filter = Control.MOUSE_FILTER_STOP
+    mouse_default_cursor_shape = Control.CURSOR_DRAG
     clip_contents = true
+    gui_input.connect(_on_gui_input)
 
     var container := SubViewportContainer.new()
     container.name = "PreviewViewport"
@@ -132,8 +146,33 @@ func _process(delta: float) -> void:
     if _stage == null or not is_visible_in_tree():
         return
     _time += delta
-    _angle = fmod(_angle + delta * SPIN_SPEED, 360.0)
-    var pose := _stage.rotation_degrees
-    pose.y = _angle
-    _stage.rotation_degrees = pose
+    if auto_spin and not _dragging:
+        if _spin_pause > 0.0:
+            _spin_pause = maxf(_spin_pause - delta, 0.0)
+        else:
+            _yaw = wrapf(_yaw + delta * SPIN_SPEED, 0.0, 360.0)
+    _apply_yaw()
     FashionVisuals.animate(_rig, _time, 0.0)
+
+
+## Drag with the left mouse button to turn the model by hand.
+func _on_gui_input(event: InputEvent) -> void:
+    if event is InputEventMouseButton:
+        var button := event as InputEventMouseButton
+        if button.button_index != MOUSE_BUTTON_LEFT:
+            return
+        _dragging = button.pressed
+        _spin_pause = 0.0 if _dragging else AUTO_SPIN_RESUME_DELAY
+        accept_event()
+    elif event is InputEventMouseMotion and _dragging:
+        var motion := event as InputEventMouseMotion
+        _yaw = wrapf(_yaw + motion.relative.x * DRAG_SENSITIVITY, 0.0, 360.0)
+        _spin_pause = 0.0
+        _apply_yaw()
+        accept_event()
+
+
+func _apply_yaw() -> void:
+    var pose := _stage.rotation_degrees
+    pose.y = _yaw
+    _stage.rotation_degrees = pose

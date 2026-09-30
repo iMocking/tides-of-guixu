@@ -135,7 +135,7 @@ const TEXT := {
     "game_saved": "\u4fee\u884c\u5df2\u8bb0\u5f55\u3002",
     "continue_hint": "\u8bfb\u53d6\u4e0a\u6b21\u7684\u4fee\u884c\u8fdb\u5ea6",
     "crit": "\u66b4\u51fb",
-    "default_player_name": "\u65e0\u540d\u6563\u4fee",
+    "default_player_name": "\u9648\u68a6\u98de",
     "relation_same": "\u540c\u6e90",
     "relation_generates": "\u76f8\u751f",
     "relation_overcomes": "\u76f8\u514b",
