@@ -42,10 +42,14 @@ func _run_tests() -> void:
     await _test_character_model()
     print("== player integration ==")
     await _test_player()
+    print("== vital bars ==")
+    await _test_vital_bar()
     print("== mirror rotation ==")
     await _test_mirror_rotation()
     print("== wardrobe panel ==")
     await _test_panel()
+    print("== cursor peek ==")
+    _test_cursor_peek()
     print("== game ui integration ==")
     await _test_game_ui()
 
@@ -548,6 +552,74 @@ func _test_game_ui() -> void:
     check(not ui._character_preview.auto_spin, "the character sheet model does not spin on its own")
     check(ui._character_preview.mouse_filter == Control.MOUSE_FILTER_STOP, "the character sheet model takes mouse input for dragging")
 
+    # ---- League-style bottom cluster ----
+    check(ui._health_bar is VitalBar and ui._qi_bar is VitalBar, "health and qi are LoL-style trackers")
+    check(not ui._bar_values.has("health"), "the health bar left the top-left status panel")
+    check(ui._bar_values.has("cultivation_progress"), "the status panel keeps the cultivation bar")
+
+    ui._open_panel(ui._character_panel, "character")
+    await get_tree().process_frame
+    await get_tree().process_frame
+    var health_bottom: float = ui._health_bar.global_position.y + ui._health_bar.size.y
+    var qi_bottom: float = ui._qi_bar.global_position.y + ui._qi_bar.size.y
+    var skill_top: float = ui._skill_bar.global_position.y
+    check(ui._health_bar.size.x > 300.0, "the trackers span the ability row (%.0f px)" % ui._health_bar.size.x)
+    check(absf(ui._health_bar.size.x - ui._skill_bar.size.x) < 1.0, "the trackers are exactly as wide as the ability row")
+    check(health_bottom <= ui._qi_bar.global_position.y + 0.5, "health sits above qi")
+    check(qi_bottom <= skill_top + 0.5, "both trackers sit above the ability row")
+    check(ui._health_bar.size.y > ui._qi_bar.size.y, "the health bar is the thicker of the two")
+    check(ui._level_badge.global_position.x + ui._level_badge.size.x <= ui._health_bar.global_position.x + 0.5, "the realm pip sits left of the health bar")
+    check(ui._level_badge_label.text == str(GameState.realm_index + 1), "the realm pip shows the realm number")
+    ui._close_panels()
+
+    # Trackers mirror the live state.
+    var total := GameState.get_total_stats()
+    GameState.health = 40.0
+    ui._refresh_hud()
+    check(is_equal_approx(ui._health_bar.value, 40.0), "the health tracker follows the state")
+    check(ui._health_bar.caption == "40 / %d" % int(round(float(total["max_health"]))), "the health caption reads current / max (%s)" % ui._health_bar.caption)
+
+    # ---- ability slots ----
+    var first_button: Button = ui._skill_buttons.get("basic_attack")
+    check(first_button != null, "the ability row is built")
+    if first_button != null:
+        check(absf(first_button.size.x - first_button.size.y) < 0.5, "ability slots stay square (%.0f x %.0f)" % [first_button.size.x, first_button.size.y])
+        var key_badge := first_button.get_node_or_null("KeyBadge") as Label
+        check(key_badge != null, "each ability shows its key hint")
+        if key_badge != null:
+            check(key_badge.anchor_left == 1.0 and key_badge.anchor_top == 1.0, "the key hint sits in the bottom-right corner")
+            check(key_badge.text == LocaleData.text("key_hint_attack"), "the attack slot shows the mouse hint (%s)" % key_badge.text)
+        var second_button: Button = ui._skill_buttons.get("skill_1")
+        if second_button != null:
+            var second_badge := second_button.get_node_or_null("KeyBadge") as Label
+            check(second_badge != null and second_badge.text == GameState.get_binding_label("skill_1"), "slots show their real key binding (got %s)" % (second_badge.text if second_badge != null else "?"))
+        check(ui._skill_buttons.has("ultimate"), "the ultimate gets a slot too")
+        check(ui._skill_bar.get_child_count() == GameData.ACTION_SKILLS.size(), "every action skill has a slot (%d)" % ui._skill_bar.get_child_count())
+        check(first_button.clip_contents, "ability slots clip their children so the cooldown wedge cannot spill out")
+        var sweep: CooldownSweep = first_button.get_node_or_null("CooldownClip/CooldownSweep")
+        check(sweep != null, "each ability has a cooldown sweep")
+        if sweep != null:
+            var clip := sweep.get_parent() as Control
+            check(clip != null and clip.clip_contents, "the wedge is clipped to its own frame")
+            if clip != null:
+                var clip_origin := clip.global_position - first_button.global_position
+                check(is_equal_approx(clip_origin.x, GameUI.COOLDOWN_INSET) and is_equal_approx(clip_origin.y, GameUI.COOLDOWN_INSET), "the clip frame is inset from the slot border (%.1f, %.1f)" % [clip_origin.x, clip_origin.y])
+                check(is_equal_approx(clip.size.x, first_button.size.x - 2.0 * GameUI.COOLDOWN_INSET), "the clip frame is smaller than the slot (%.1f in %.1f)" % [clip.size.x, first_button.size.x])
+                check(clip_origin.x + clip.size.x <= first_button.size.x + 0.5, "the clipped wedge cannot reach the next slot")
+            check(is_equal_approx(sweep.size.x, clip.size.x), "the sweep fills its clip frame")
+
+    # A running cooldown shows a sweep proportional to the remaining time.
+    player.skill_cooldowns["basic_attack"] = 0.325
+    ui._process(0.016)
+    var sweep_node: CooldownSweep = first_button.get_node_or_null("CooldownClip/CooldownSweep")
+    if sweep_node != null:
+        check(sweep_node.visible, "the sweep shows while cooling down")
+        check(absf(sweep_node.ratio() - 0.5) < 0.02, "the wedge covers the remaining half (%.2f)" % sweep_node.ratio())
+    player.skill_cooldowns["basic_attack"] = 0.0
+    ui._process(0.016)
+    if sweep_node != null:
+        check(not sweep_node.visible, "the sweep clears when the ability is ready")
+
     # Name / realm / root live in an identity block above the attributes.
     check(ui._char_values.has("player_name"), "the character sheet shows the character name")
     check(ui._char_values["player_name"].text == GameState.player_name, "the identity card shows the name")
@@ -606,8 +678,122 @@ func _test_game_ui() -> void:
             check(card.global_position.y >= y0, "the identity card follows its own header")
             check(card.global_position.y + card.size.y <= y1, "the identity block ends above the base attributes")
 
+    # ---- bottom-left log: a kill carries the cultivation it granted ----
+    GameState.cultivation_xp = 0.0
+    var rng := RandomNumberGenerator.new()
+    rng.seed = 7
+    var wolf := Enemy.new()
+    wolf.setup("demon_wolf", rng)
+    add_child(wolf)
+    check(is_equal_approx(wolf.xp_reward, 35.0), "the demon wolf is worth 35 cultivation")
+    check(wolf.defeat_log_line(wolf.xp_reward) == "击败 玄风妖狼  修为 +35", "the kill line names the enemy and its xp (got %s)" % wolf.defeat_log_line(wolf.xp_reward))
+    check(wolf.defeat_log_line(0.0) == "击败 玄风妖狼", "a kill worth no cultivation shows just the name")
+
+    var lines_before := ui._log_lines.size()
+    wolf._die(Vector3.ZERO)
+    check(is_equal_approx(GameState.cultivation_xp, 35.0), "the kill granted its cultivation (%.1f)" % GameState.cultivation_xp)
+    check(ui._log_lines.size() == lines_before + 1, "the kill added exactly one log line (%d -> %d)" % [lines_before, ui._log_lines.size()])
+    var newest := str(ui._log_lines[ui._log_lines.size() - 1])
+    check(newest == "击败 玄风妖狼  修为 +35", "the bottom-left log reads 击败 玄风妖狼  修为 +35 (got %s)" % newest)
+    check(ui._log_label.text.ends_with(newest), "the log label renders the newest line")
+
+    # The history stays bounded.
+    for i in range(10):
+        EventBus.combat_log.emit("测试行 %d" % i)
+    check(ui._log_lines.size() <= 6, "the log keeps at most six lines (%d)" % ui._log_lines.size())
+
+    # The panel manager goes through the same mouse-mode rule.
+    var restore_camera := int(GameState.settings.get("camera_mode", 0))
+    GameState.settings["camera_mode"] = 1
+    ui._sync_pause()
+    check(GameState.last_applied_mouse_mode == Input.MOUSE_MODE_VISIBLE, "an open character sheet shows the cursor")
+
+    ui._close_panels()
+    check(GameState.last_applied_mouse_mode == Input.MOUSE_MODE_CAPTURED, "closing it locks the mouse in third-person")
+
+    Input.action_press(GameState.PEEK_ACTION)
+    ui._sync_pause()
+    check(GameState.last_applied_mouse_mode == Input.MOUSE_MODE_VISIBLE, "holding Alt shows the cursor with no panel open")
+    Input.action_release(GameState.PEEK_ACTION)
+    ui._sync_pause()
+    check(GameState.last_applied_mouse_mode == Input.MOUSE_MODE_CAPTURED, "releasing Alt hands the mouse back")
+
+    GameState.settings["camera_mode"] = restore_camera
     ui.queue_free()
     player.queue_free()
+
+
+# ------------------------------------------------------------- peek key ---
+func _test_cursor_peek() -> void:
+    check(InputMap.has_action(GameState.PEEK_ACTION), "the peek action is registered")
+    check(GameState.BINDABLE_ACTIONS.has(GameState.PEEK_ACTION), "the peek key can be rebound in the settings panel")
+    check(GameState.get_binding_label(GameState.PEEK_ACTION) != "-", "the peek key has a default binding (%s)" % GameState.get_binding_label(GameState.PEEK_ACTION))
+
+    var restore_camera := int(GameState.settings.get("camera_mode", 0))
+
+    # Top-down play never locks the mouse.
+    GameState.settings["camera_mode"] = 0
+    check(GameState.desired_mouse_mode(false) == Input.MOUSE_MODE_VISIBLE, "top-down play keeps the cursor")
+    check(GameState.desired_mouse_mode(true) == Input.MOUSE_MODE_VISIBLE, "an open panel keeps the cursor")
+
+    # Third-person locks it until the peek key is held.
+    GameState.settings["camera_mode"] = 1
+    check(GameState.desired_mouse_mode(false) == Input.MOUSE_MODE_CAPTURED, "third-person play locks the mouse")
+    Input.action_press(GameState.PEEK_ACTION)
+    check(GameState.is_cursor_peeked(), "holding the peek key is detected")
+    check(GameState.desired_mouse_mode(false) == Input.MOUSE_MODE_VISIBLE, "holding Alt shows the cursor in third-person")
+    check(GameState.desired_mouse_mode(true) == Input.MOUSE_MODE_VISIBLE, "a panel wins over the peek key")
+    Input.action_release(GameState.PEEK_ACTION)
+    check(not GameState.is_cursor_peeked(), "releasing the peek key is detected")
+    check(GameState.desired_mouse_mode(false) == Input.MOUSE_MODE_CAPTURED, "releasing Alt locks the mouse again")
+
+    # apply_mouse_mode() is what the world and the panel manager call; it also
+    # records the request so a headless display server can still be tested.
+    GameState.apply_mouse_mode(false)
+    check(GameState.last_applied_mouse_mode == Input.MOUSE_MODE_CAPTURED, "apply_mouse_mode records the locked request")
+    Input.action_press(GameState.PEEK_ACTION)
+    GameState.apply_mouse_mode(false)
+    check(GameState.last_applied_mouse_mode == Input.MOUSE_MODE_VISIBLE, "apply_mouse_mode follows the peek key")
+    Input.action_release(GameState.PEEK_ACTION)
+    GameState.apply_mouse_mode(true)
+    check(GameState.last_applied_mouse_mode == Input.MOUSE_MODE_VISIBLE, "apply_mouse_mode shows the cursor for panels")
+
+    GameState.settings["camera_mode"] = restore_camera
+
+
+# ------------------------------------------------------------ vital bars ---
+func _test_vital_bar() -> void:
+    check(VitalBar.nice_tick_step(160.0) == 20.0, "a 160 point bar ticks every 20")
+    check(VitalBar.nice_tick_step(100.0) == 10.0, "a 100 point bar ticks every 10")
+    check(VitalBar.nice_tick_step(10000.0) == 1000.0, "a 10000 point bar ticks every 1000")
+    check(VitalBar.nice_tick_step(4.0) == 0.0, "tiny bars get no ticks")
+
+    var bar := VitalBar.new()
+    bar.custom_minimum_size = Vector2(300, 20)
+    bar.size = Vector2(300, 20)
+    add_child(bar)
+    await get_tree().process_frame
+
+    bar.set_values(160.0, 160.0)
+    check(is_equal_approx(bar.value, 160.0) and is_equal_approx(bar.max_value, 160.0), "set_values stores the tracker")
+    check(bar.caption == "160 / 160", "the bar prints its own caption (%s)" % bar.caption)
+    check(bar.tick_step == 20.0, "the bar picks its tick step from the maximum")
+
+    # The damage ghost trails the value and then drains into it.
+    bar.set_values(60.0, 160.0)
+    check(bar._ghost > bar.value, "recent damage leaves a ghost behind the fill")
+    bar._process(0.1)
+    check(bar._ghost > bar.value and bar._ghost < 160.0, "the ghost drains over time")
+    bar._process(5.0)
+    check(is_equal_approx(bar._ghost, 60.0), "the ghost catches up with the value")
+    check(bar.caption == "60 / 160", "the caption follows the value")
+
+    # Values are clamped instead of overflowing the plate.
+    bar.set_values(999.0, 160.0)
+    check(is_equal_approx(bar.value, 160.0), "the value clamps to the maximum")
+    bar.set_values(-5.0, 160.0)
+    check(is_equal_approx(bar.value, 0.0), "the value clamps to zero")
+    bar.queue_free()
 
 
 # ------------------------------------------------------- mirror rotation ---

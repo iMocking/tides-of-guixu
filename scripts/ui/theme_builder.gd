@@ -292,13 +292,14 @@ static func _setup_buttons(theme: Theme) -> void:
     theme.set_color("font_pressed_color", "MenuPlaquePrimary", JADE)
     theme.set_color("font_disabled_color", "MenuPlaquePrimary", Color(0.46, 0.42, 0.34))
 
-    # Skill slot: same borderless idea but a crisp SQUARE frame (radius 0).
+    # Ability slot: a League-style square icon frame - dark plate, crisp 1px
+    # border (radius 0) that lights up on hover / press.
     theme.set_type_variation("SkillSlotButton", "Button")
-    theme.set_stylebox("normal", "SkillSlotButton", flat_box(Color(0, 0, 0, 0), Color(0, 0, 0, 0), 0, 0, 3.0, 3.0))
-    theme.set_stylebox("hover", "SkillSlotButton", flat_box(Color(JADE.r, JADE.g, JADE.b, 0.14), Color(JADE.r, JADE.g, JADE.b, 0.55), 0, 1, 3.0, 3.0))
-    theme.set_stylebox("pressed", "SkillSlotButton", flat_box(Color(JADE.r, JADE.g, JADE.b, 0.24), Color(JADE.r, JADE.g, JADE.b, 0.9), 0, 1, 3.0, 3.0))
-    theme.set_stylebox("disabled", "SkillSlotButton", flat_box(Color(0, 0, 0, 0), Color(0, 0, 0, 0), 0, 0, 3.0, 3.0))
-    theme.set_stylebox("focus", "SkillSlotButton", flat_box(Color(0, 0, 0, 0), Color(JADE.r, JADE.g, JADE.b, 0.7), 0, 1, 3.0, 3.0))
+    theme.set_stylebox("normal", "SkillSlotButton", flat_box(BG_SLOT, BORDER_SOFT, 0, 1, 3.0, 3.0))
+    theme.set_stylebox("hover", "SkillSlotButton", flat_box(BG_RAISED, JADE, 0, 1, 3.0, 3.0))
+    theme.set_stylebox("pressed", "SkillSlotButton", flat_box(Color(JADE.r, JADE.g, JADE.b, 0.24), JADE, 0, 1, 3.0, 3.0))
+    theme.set_stylebox("disabled", "SkillSlotButton", flat_box(Color(0.063, 0.078, 0.098, 0.62), BORDER_MUTED, 0, 1, 3.0, 3.0))
+    theme.set_stylebox("focus", "SkillSlotButton", flat_box(Color(0, 0, 0, 0), JADE, 0, 1, 3.0, 3.0))
 
     # Borderless icon button: no plate behind the glyph, only a soft hover hint.
     theme.set_type_variation("FlatIconButton", "Button")

@@ -14,14 +14,27 @@ const INVENTORY_MAX_PAGE_CELLS := 42
 const INVENTORY_CELL := 72.0
 const INVENTORY_GAP := 8.0
 const INVENTORY_FILTERS: Array[String] = ["all", "equipment", "consumable", "material"]
+## Bottom cluster metrics: League arranges the vitals right above the ability
+## row, with the level pip at the left end of the health bar.
+const SKILL_BUTTON_SIZE := 72.0
+const SKILL_GAP := 8.0
+const VITAL_BAR_HEIGHT := 20.0
+const QI_BAR_HEIGHT := 13.0
+const VITAL_GAP := 4.0
+const LEVEL_BADGE_SIZE := 40.0
+const CLUSTER_BOTTOM_MARGIN := 18.0
+## The cooldown wedge is inset so the slot border stays visible on top of it.
+const COOLDOWN_INSET := 2.0
 const CHARACTER_LEFT_SLOTS: Array[String] = ["weapon", "head", "body", "bracers"]
 const CHARACTER_RIGHT_SLOTS: Array[String] = ["legs", "boots", "accessory", "talisman"]
 
 var player: Player
 
 # ------------------------------------------------------------------- HUD ----
-var _health_bar: ProgressBar
-var _qi_bar: ProgressBar
+var _health_bar: VitalBar
+var _qi_bar: VitalBar
+var _level_badge: PanelContainer
+var _level_badge_label: Label
 var _cultivation_bar: ProgressBar
 var _realm_label: Label
 var _element_label: Label
@@ -36,6 +49,8 @@ var _log_lines: Array[String] = []
 var _skill_buttons: Dictionary = {}
 var _skill_icons: Dictionary = {}
 var _skill_cooldown_labels: Dictionary = {}
+var _skill_sweeps: Dictionary = {}
+var _skill_bar: HBoxContainer
 var _compass: ViewCompass
 var _quest_panel: PanelContainer
 var _quest_label: Label
@@ -209,8 +224,8 @@ func _build_hud(root: Control) -> void:
     _element_label = _shadowed(UIKit.label("", "SectionLabel"))
     status_header.add_child(_element_label)
 
-    _health_bar = _make_status_bar(status_column, "health", "HealthBar", ThemeBuilder.HEALTH_COLOR)
-    _qi_bar = _make_status_bar(status_column, "qi", "QiBar", ThemeBuilder.QI_COLOR)
+    # Health and qi moved into the bottom cluster (see _build_bottom_cluster);
+    # this panel keeps the cultivation progress plus the calendar / element line.
     _cultivation_bar = _make_status_bar(status_column, "cultivation_progress", "CultivationBar", ThemeBuilder.CULTIVATION_COLOR)
 
     var status_footer := UIKit.hbox(8)
@@ -258,25 +273,7 @@ func _build_hud(root: Control) -> void:
     _compass.custom_minimum_size = Vector2(184, 32)
     compass_margin.add_child(_compass)
 
-    var skill_bar := UIKit.hbox(8)
-    skill_bar.name = "SkillBar"
-    skill_bar.anchor_left = 0.5
-    skill_bar.anchor_right = 0.5
-    skill_bar.anchor_top = 1.0
-    skill_bar.anchor_bottom = 1.0
-    skill_bar.offset_left = -280
-    skill_bar.offset_right = 280
-    skill_bar.offset_top = -100
-    skill_bar.offset_bottom = -16
-    skill_bar.alignment = BoxContainer.ALIGNMENT_CENTER
-    root.add_child(skill_bar)
-
-    var index := 1
-    for skill_id in GameData.ACTION_SKILLS:
-        var button := _make_skill_button(skill_id, index)
-        skill_bar.add_child(button)
-        _skill_buttons[skill_id] = button
-        index += 1
+    _build_bottom_cluster(root)
 
     _toast_panel = PanelContainer.new()
     _toast_panel.name = "ToastPanel"
@@ -302,8 +299,8 @@ func _build_hud(root: Control) -> void:
     log_panel.anchor_bottom = 1.0
     log_panel.offset_left = 18
     log_panel.offset_right = 410
-    log_panel.offset_top = -300
-    log_panel.offset_bottom = -120
+    log_panel.offset_top = -320
+    log_panel.offset_bottom = -140
     log_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
     root.add_child(log_panel)
 
@@ -357,14 +354,88 @@ func _build_hud(root: Control) -> void:
     _interact_panel.anchor_bottom = 1.0
     _interact_panel.offset_left = -230
     _interact_panel.offset_right = 230
-    _interact_panel.offset_top = -160
-    _interact_panel.offset_bottom = -122
+    # Clear of the vitals / ability cluster below.
+    _interact_panel.offset_top = -182
+    _interact_panel.offset_bottom = -144
     _interact_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
     root.add_child(_interact_panel)
     _interact_label = UIKit.label("", "GoldValueLabel", HORIZONTAL_ALIGNMENT_CENTER)
     _interact_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
     _interact_panel.add_child(_interact_label)
     _interact_panel.hide()
+
+## Bottom cluster, laid out the way League does it: a realm pip, the health and
+## qi trackers stacked on top of each other, and the ability row right under
+## them, all centred at the bottom of the screen.
+func _build_bottom_cluster(root: Control) -> void:
+    var skill_width := _skill_row_width()
+    var cluster_height := VITAL_BAR_HEIGHT + VITAL_GAP + QI_BAR_HEIGHT + VITAL_GAP + SKILL_BUTTON_SIZE
+
+    var cluster := UIKit.hbox(8)
+    cluster.name = "VitalCluster"
+    cluster.anchor_left = 0.5
+    cluster.anchor_right = 0.5
+    cluster.anchor_top = 1.0
+    cluster.anchor_bottom = 1.0
+    cluster.offset_left = -320
+    cluster.offset_right = 320
+    cluster.offset_top = -(cluster_height + CLUSTER_BOTTOM_MARGIN)
+    cluster.offset_bottom = -CLUSTER_BOTTOM_MARGIN
+    cluster.alignment = BoxContainer.ALIGNMENT_CENTER
+    root.add_child(cluster)
+
+    # Realm pip: the round gold badge on the left end of the health bar.
+    _level_badge = PanelContainer.new()
+    _level_badge.name = "LevelBadge"
+    _level_badge.custom_minimum_size = Vector2(LEVEL_BADGE_SIZE, LEVEL_BADGE_SIZE)
+    _level_badge.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+    _level_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    _level_badge.add_theme_stylebox_override("panel", ThemeBuilder.flat_box(
+        Color(0.043, 0.059, 0.090, 0.88), ThemeBuilder.BORDER_GOLD, int(LEVEL_BADGE_SIZE * 0.5), 2))
+    cluster.add_child(_level_badge)
+
+    _level_badge_label = _shadowed(UIKit.label("1", "GoldValueLabel", HORIZONTAL_ALIGNMENT_CENTER))
+    _level_badge_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+    _level_badge_label.add_theme_font_size_override("font_size", 18)
+    _level_badge.add_child(_level_badge_label)
+
+    var column := UIKit.vbox(VITAL_GAP)
+    column.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+    column.custom_minimum_size = Vector2(skill_width, 0)
+    cluster.add_child(column)
+
+    _health_bar = VitalBar.new()
+    _health_bar.name = "HealthBar"
+    _health_bar.bar_color = ThemeBuilder.HEALTH_COLOR
+    _health_bar.custom_minimum_size = Vector2(0, VITAL_BAR_HEIGHT)
+    _health_bar.tooltip_text = LocaleData.text("health")
+    column.add_child(_health_bar)
+
+    _qi_bar = VitalBar.new()
+    _qi_bar.name = "QiBar"
+    _qi_bar.bar_color = ThemeBuilder.QI_COLOR
+    _qi_bar.font_size = 11
+    _qi_bar.custom_minimum_size = Vector2(0, QI_BAR_HEIGHT)
+    _qi_bar.tooltip_text = LocaleData.text("qi")
+    column.add_child(_qi_bar)
+
+    var skill_bar := UIKit.hbox(SKILL_GAP)
+    skill_bar.name = "SkillBar"
+    skill_bar.alignment = BoxContainer.ALIGNMENT_CENTER
+    column.add_child(skill_bar)
+    _skill_bar = skill_bar
+
+    for skill_id in GameData.ACTION_SKILLS:
+        var button := _make_skill_button(skill_id)
+        skill_bar.add_child(button)
+        _skill_buttons[skill_id] = button
+
+
+## Width of the ability row; the trackers above it match it exactly.
+func _skill_row_width() -> float:
+    var count := GameData.ACTION_SKILLS.size()
+    return float(count) * SKILL_BUTTON_SIZE + float(maxi(count - 1, 0)) * SKILL_GAP
+
 
 ## Soft dark shadow so a label stays readable on the plate-free HUD panels.
 func _shadowed(node: Label) -> Label:
@@ -395,37 +466,73 @@ func _make_status_bar(parent: VBoxContainer, title_key: String, variation: Strin
 ## One transparent skill icon: element glyph, key hint in the corner and a
 ## countdown label that appears while the skill is cooling down.
 
-func _make_skill_button(skill_id: String, index: int) -> Button:
+## Corner key hint of a slot: the key it is really bound to, shortened so it
+## still fits - the basic attack lives on the mouse button.
+func _skill_key_hint(skill_id: String) -> String:
+    var action := "attack" if skill_id == "basic_attack" else skill_id
+    if action == "attack":
+        return LocaleData.text("key_hint_attack")
+    var label := GameState.get_binding_label(action)
+    if label == "" or label == "-":
+        return "?"
+    return label
+
+
+func _make_skill_button(skill_id: String) -> Button:
     var name_text := LocaleData.text(skill_id)
-    var tooltip_text := "%s  [%d]\n%s%s" % [
+    var key_hint := _skill_key_hint(skill_id)
+    var tooltip_text := "%s  [%s]\n%s%s" % [
         name_text,
-        index,
+        key_hint,
         LocaleData.text("skill_desc_" + skill_id),
         "" if str(GameData.skill(skill_id).get("element", "none")) == "none" else "  |  " + GameData.element_name(str(GameData.skill(skill_id).get("element", "none"))),
     ]
-    var button := UIKit.glyph_button(_skill_glyph(skill_id), tooltip_text, _on_skill_button_pressed.bind(skill_id), 38.0, Vector2(72, 72), _skill_tint(), "SkillSlotButton")
+    var button := UIKit.glyph_button(_skill_glyph(skill_id), tooltip_text, _on_skill_button_pressed.bind(skill_id), 38.0, Vector2(SKILL_BUTTON_SIZE, SKILL_BUTTON_SIZE), _skill_tint(), "SkillSlotButton")
     button.name = "Skill_" + skill_id
     # Keep the frame a true square: the bar is taller than the button.
     button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 
-    # Small key badge tucked into the glyph's top-right corner.
-    var key_label := UIKit.label(str(index), "HintLabel")
+    # Cooldown wedge, added first so the key hint and the countdown sit above
+    # it.  The wedge is a pie drawn out of the slot centre with a radius that
+    # reaches the corners, so it has to be clipped to the slot: it is mounted
+    # inside an inset frame that both keeps the arc inside the slot and leaves
+    # the 1px slot border visible.
+    button.clip_contents = true
+    var cooldown_frame := Control.new()
+    cooldown_frame.name = "CooldownClip"
+    cooldown_frame.clip_contents = true
+    cooldown_frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    cooldown_frame.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    cooldown_frame.offset_left = COOLDOWN_INSET
+    cooldown_frame.offset_top = COOLDOWN_INSET
+    cooldown_frame.offset_right = -COOLDOWN_INSET
+    cooldown_frame.offset_bottom = -COOLDOWN_INSET
+    button.add_child(cooldown_frame)
+
+    var sweep := CooldownSweep.new()
+    sweep.name = "CooldownSweep"
+    sweep.hide()
+    cooldown_frame.add_child(sweep)
+    _skill_sweeps[skill_id] = sweep
+
+    # Key hint tucked into the bottom-right corner, like League's ability slots.
+    var key_label := UIKit.label(key_hint, "HintLabel")
     key_label.name = "KeyBadge"
     key_label.add_theme_font_size_override("font_size", 12)
-    key_label.add_theme_color_override("font_color", ThemeBuilder.JADE)
-    key_label.add_theme_color_override("font_shadow_color", Color(0.0, 0.0, 0.0, 0.65))
+    key_label.add_theme_color_override("font_color", ThemeBuilder.TEXT)
+    key_label.add_theme_color_override("font_shadow_color", Color(0.0, 0.0, 0.0, 0.8))
     key_label.add_theme_constant_override("shadow_offset_x", 1)
     key_label.add_theme_constant_override("shadow_offset_y", 1)
     key_label.anchor_left = 1.0
     key_label.anchor_right = 1.0
-    key_label.anchor_top = 0.0
-    key_label.anchor_bottom = 0.0
-    key_label.offset_left = -22.0
-    key_label.offset_right = -5.0
-    key_label.offset_top = 2.0
-    key_label.offset_bottom = 17.0
+    key_label.anchor_top = 1.0
+    key_label.anchor_bottom = 1.0
+    key_label.offset_left = -24.0
+    key_label.offset_right = -6.0
+    key_label.offset_top = -20.0
+    key_label.offset_bottom = -4.0
     key_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-    key_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+    key_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
     button.add_child(key_label)
 
     var cooldown_label := UIKit.label("", "HintLabel")
@@ -901,19 +1008,12 @@ func _refresh_hud() -> void:
     var total := GameState.get_total_stats()
     var max_health := maxf(float(total["max_health"]), 1.0)
     var max_qi := maxf(float(total["max_qi"]), 1.0)
-    _health_bar.max_value = max_health
-    _health_bar.value = clampf(GameState.health, 0.0, max_health)
-    _qi_bar.max_value = max_qi
-    _qi_bar.value = clampf(GameState.qi, 0.0, max_qi)
-    _health_bar.tooltip_text = LocaleData.text("health")
-    _qi_bar.tooltip_text = LocaleData.text("qi")
-
-    var health_label: Label = _bar_values.get("health")
-    if health_label != null:
-        health_label.text = "%d / %d" % [int(round(GameState.health)), int(round(max_health))]
-    var qi_label: Label = _bar_values.get("qi")
-    if qi_label != null:
-        qi_label.text = "%d / %d" % [int(round(GameState.qi)), int(round(max_qi))]
+    # The two trackers print their own captions.
+    _health_bar.set_values(GameState.health, max_health)
+    _qi_bar.set_values(GameState.qi, max_qi)
+    if _level_badge != null:
+        _level_badge_label.text = str(GameState.realm_index + 1)
+        _level_badge.tooltip_text = "%s：%s" % [LocaleData.text("realm"), GameState.get_realm_name()]
 
     _realm_label.text = GameState.get_realm_name()
     _element_label.text = GameState.get_element_name()
@@ -1296,15 +1396,22 @@ func _process(delta: float) -> void:
             var cooldown := float(player.skill_cooldowns.get(skill_id, 0.0))
             var icon: UiIcon = _skill_icons.get(skill_id)
             var cooldown_label: Label = _skill_cooldown_labels.get(skill_id)
+            var sweep: CooldownSweep = _skill_sweeps.get(skill_id)
             if icon != null:
                 icon.set_tint(_skill_tint())
             if cooldown > 0.05:
+                var total := float(GameData.skill(skill_id).get("cooldown", 1.0))
+                if sweep != null:
+                    sweep.set_cooldown(cooldown, total)
+                    sweep.show()
                 if cooldown_label != null:
                     cooldown_label.text = "%.1f" % cooldown
                     cooldown_label.show()
                 if icon != null:
                     icon.modulate = Color(1.0, 1.0, 1.0, 0.3)
             else:
+                if sweep != null:
+                    sweep.hide()
                 if cooldown_label != null:
                     cooldown_label.hide()
                 if icon != null:
@@ -1411,12 +1518,7 @@ func _any_panel_active() -> bool:
 func _sync_pause() -> void:
     var open := _any_panel_active()
     get_tree().paused = open
-    if open:
-        Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-    elif int(GameState.settings.get("camera_mode", 0)) == 1:
-        Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-    else:
-        Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+    GameState.apply_mouse_mode(open)
 
 func _on_panel_scrim_input(event: InputEvent) -> void:
     if event is InputEventMouseButton:

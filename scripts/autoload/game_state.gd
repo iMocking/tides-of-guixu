@@ -2,6 +2,8 @@ extends Node
 ## Global game state: character, inventory, equipment, achievements, calendar and save data.
 
 const SAVE_PATH := "user://tides_of_guixu_save.json"
+## Hold this action to show the cursor without leaving the mouse lock.
+const PEEK_ACTION := "peek_cursor"
 ## Default name used before 陈梦飞 was introduced; saves still carrying it
 ## are upgraded on load (see load_game).
 const LEGACY_DEFAULT_PLAYER_NAME := "无名散修"
@@ -56,6 +58,7 @@ const DEFAULT_KEYS := {
     "toggle_character": [KEY_C],
     "toggle_achievements": [KEY_K],
     "toggle_fashion": [KEY_U],
+    "peek_cursor": [KEY_ALT],
     "toggle_game_menu": [KEY_ESCAPE],
     "toggle_camera": [KEY_V],
     "skill_1": [KEY_1],
@@ -75,7 +78,7 @@ const BINDABLE_ACTIONS: Array[String] = [
     "skill_1", "skill_2", "skill_3", "skill_4", "ultimate",
     "camera_rotate_left", "camera_rotate_right", "camera_reset", "toggle_camera",
     "toggle_inventory", "toggle_character", "toggle_achievements", "toggle_game_menu",
-    "toggle_fashion",
+    "toggle_fashion", "peek_cursor",
 ]
 
 const FPS_OPTIONS := [30, 60, 90, 120, 144, 0]
@@ -173,6 +176,39 @@ func _process(delta: float) -> void:
         changed = true
     if changed:
         EventBus.time_changed.emit(get_pillars())
+
+## True while the player holds the peek key (Alt) inside the world.
+func is_cursor_peeked() -> bool:
+    return InputMap.has_action(PEEK_ACTION) and Input.is_action_pressed(PEEK_ACTION)
+
+
+## The mouse mode the world should be in right now.
+##
+## Panels pause the game and always want a cursor; so does the player while
+## holding the peek key in third-person play, which lets them reach the HUD
+## without leaving the mouse lock.  The key is read live, so releasing it
+## while a panel is open can never strand the cursor.
+func desired_mouse_mode(panel_open: bool = false) -> int:
+    if panel_open or is_cursor_peeked():
+        return Input.MOUSE_MODE_VISIBLE
+    if int(settings.get("camera_mode", 0)) == 1:
+        return Input.MOUSE_MODE_CAPTURED
+    return Input.MOUSE_MODE_VISIBLE
+
+
+## Last mode apply_mouse_mode() asked for.  A headless display server ignores
+## mouse_set_mode, so this is also what the tests assert against.
+var last_applied_mouse_mode := Input.MOUSE_MODE_VISIBLE
+
+
+## Applies desired_mouse_mode() and remembers the request.
+func apply_mouse_mode(panel_open: bool = false) -> int:
+    var mode := desired_mouse_mode(panel_open)
+    if Input.mouse_mode != mode:
+        Input.mouse_mode = mode
+    last_applied_mouse_mode = mode
+    return mode
+
 
 func _default_stats() -> Dictionary:
     var result: Dictionary = DEFAULT_STATS.duplicate(true)
@@ -474,9 +510,11 @@ func get_birth_text() -> String:
         return LocaleData.text("none")
     return str(birth_pillar.get("name", "")) + " / " + GameData.element_name(str(birth_pillar.get("element", "earth")))
 
-func add_cultivation_xp(amount: float) -> void:
+## Grants cultivation xp and returns how much was actually applied, so the
+## kill notification can print the real number.
+func add_cultivation_xp(amount: float) -> float:
     if amount <= 0.0:
-        return
+        return 0.0
     cultivation_xp += amount
     var new_realm := GameData.realm_for_xp(cultivation_xp)
     if new_realm > realm_index:
@@ -489,6 +527,7 @@ func add_cultivation_xp(amount: float) -> void:
         EventBus.toast_requested.emit(LocaleData.text("realm_up") % get_realm_name(), Color(1.0, 0.86, 0.35))
         EventBus.player_stats_changed.emit()
     check_achievements()
+    return amount
 
 func get_quest_state(quest_id: String) -> Dictionary:
     var state: Variant = quest_states.get(quest_id, {})

@@ -175,7 +175,7 @@ func _die(_source_position: Vector3) -> void:
     if get_tree().current_scene != null:
         WorldFX.spawn_aoe_ring(get_tree().current_scene, global_position + Vector3.UP * 0.2, color, 2.4, 0.8)
     GameState.record_stat("enemies_defeated", 1.0)
-    GameState.add_cultivation_xp(xp_reward)
+    var gained_xp := GameState.add_cultivation_xp(xp_reward)
     var drops := GameData.roll_loot(level, _rng)
     if not drops.is_empty() and get_tree().current_scene != null:
         var orb := LootOrb.new()
@@ -184,5 +184,14 @@ func _die(_source_position: Vector3) -> void:
         orb.snap_to_position(global_position + Vector3.UP * 0.55)
     GameState.record_quest_kill(enemy_id)
     EventBus.enemy_defeated.emit(enemy_id, global_position)
-    EventBus.combat_log.emit(LocaleData.text("enemy_defeated") % enemy_name)
+    EventBus.combat_log.emit(defeat_log_line(gained_xp))
     queue_free()
+
+
+## Bottom-left notification for a kill: the name followed by the cultivation
+## it was worth, e.g. "击败 玄风妖狼  修为 +35".  A kill worth nothing falls
+## back to just the name.
+func defeat_log_line(gained_xp: float) -> String:
+    if gained_xp <= 0.0:
+        return LocaleData.text("enemy_defeated") % enemy_name
+    return LocaleData.text("enemy_defeated_xp") % [enemy_name, LocaleData.text("cultivation"), int(round(gained_xp))]

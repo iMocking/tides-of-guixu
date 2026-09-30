@@ -111,7 +111,9 @@ const SKILLS := {
     "ultimate": {"element": "earth", "type": "heal", "qi": 28.0, "cooldown": 14.0, "heal_ratio": 0.38, "duration": 6.0},
 }
 
-const ACTION_SKILLS: Array[String] = ["basic_attack", "skill_1", "skill_2", "skill_3", "skill_4"]
+## Everything the ability row offers, in slot order: attack, the four elemental
+## skills and the ultimate (which had a glyph but no slot before).
+const ACTION_SKILLS: Array[String] = ["basic_attack", "skill_1", "skill_2", "skill_3", "skill_4", "ultimate"]
 
 const ENEMIES := {
     "demon_wolf": {"element": "wood", "level": 1, "hp": 70.0, "atk": 12.0, "def": 3.0, "speed": 4.2, "aggro": 11.0, "range": 2.2, "cooldown": 1.45, "xp": 35.0, "color": "#5e8f5b", "scale": 1.0},

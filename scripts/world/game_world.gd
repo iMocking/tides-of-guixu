@@ -297,8 +297,18 @@ func _process(delta: float) -> void:
     _update_day_night(delta)
     _handle_camera_keys(delta)
     _update_camera(delta)
+    _update_cursor_peek()
     if Input.is_action_just_pressed("toggle_camera"):
         _toggle_camera_mode()
+
+## Polled rather than event driven: holding the peek key shows the cursor at
+## once, releasing it hands the mouse back, and a panel opening or closing in
+## between can never leave the mode stuck.
+func _update_cursor_peek() -> void:
+    if get_tree().paused:
+        return
+    GameState.apply_mouse_mode(false)
+
 
 func _update_day_night(_delta: float) -> void:
     if _sun == null or _environment == null or _sky_material == null:
@@ -424,10 +434,7 @@ func _apply_camera_settings() -> void:
     if mode != _last_camera_mode:
         _last_camera_mode = mode
         _apply_camera_preset(mode, false)
-    if mode == 1 and not get_tree().paused:
-        Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-    else:
-        Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+    GameState.apply_mouse_mode(get_tree().paused)
 
 ## Brightness / screen filter / fog / shadows driven by the settings panel.
 func _apply_display_settings() -> void:
