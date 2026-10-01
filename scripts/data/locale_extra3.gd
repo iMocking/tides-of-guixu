@@ -71,4 +71,6 @@ const TEXT := {
 }
 
 static func text(key: String) -> String:
-    return str(TEXT.get(key, key))
+    if TEXT.has(key):
+        return str(TEXT[key])
+    return LocaleExtra4.text(key)

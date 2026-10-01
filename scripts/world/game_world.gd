@@ -2,6 +2,8 @@ extends Node3D
 class_name GameWorld
 
 const TERRAIN_GENERATOR_SCRIPT := preload("res://scripts/world/terrain_generator.gd")
+const TERRAIN3D_WORLD_SCRIPT := preload("res://scripts/world/terrain3d_world.gd")
+const WORLD_FEATURES_SCRIPT := preload("res://scripts/world/world_features.gd")
 
 var player: Player
 var _camera: Camera3D
@@ -11,7 +13,13 @@ var _world_env: WorldEnvironment
 var _environment: Environment
 var _sky_material: ProceduralSkyMaterial
 var _fireflies: GPUParticles3D
-var _terrain_generator
+## Active terrain back end: `Terrain3DWorld` when the Terrain3D addon loaded,
+## the streamed placeholder `TerrainGenerator` otherwise.
+var _terrain
+var _terrain3d
+var _features
+var _world_seed := 0
+var _terrain_ready := false
 var _rng := RandomNumberGenerator.new()
 var _spawn_timer := 8.0
 # Orbit camera tuning. Both camera modes share the same yaw/pitch so rotating
@@ -39,10 +47,10 @@ var _last_camera_mode := -1
 
 func _ready() -> void:
     _rng.randomize()
+    _world_seed = _rng.randi()
     _build_environment()
     _setup_terrain()
     _build_ground()
-    _build_props()
     _spawn_player()
     _spawn_npcs()
     _spawn_initial_enemies()
@@ -51,15 +59,43 @@ func _ready() -> void:
     EventBus.camera_shake_requested.connect(_on_camera_shake_requested)
     EventBus.settings_changed.connect(_apply_camera_settings)
     _apply_camera_settings()
+    # The terrain back end may still be streaming; the props, the spawn heights
+    # and the loading bar all wait on it.
+    _watch_terrain()
 
 func get_player() -> Player:
     return player
 
 
 func is_world_ready() -> bool:
-    if player == null or _terrain_generator == null:
-        return false
-    return _terrain_generator.get_loaded_chunk_count() > 0
+    return player != null and _terrain != null and _terrain_ready and _features != null
+
+
+## 0..1 loading progress of the terrain back end, driven by the loading screen.
+func get_load_progress() -> float:
+    if is_world_ready():
+        return 1.0
+    if _terrain != null and _terrain.has_method("get_progress"):
+        return clampf(0.08 + float(_terrain.get_progress()) * 0.86, 0.0, 0.96)
+    return 0.08
+
+
+## Name of the live terrain back end, so the loading log can say which one ran.
+func get_terrain_backend_name() -> String:
+    if _terrain3d != null:
+        return "Terrain3D"
+    return "TerrainGenerator"
+
+
+## Number of clipmap regions / streamed chunks currently built.
+func get_terrain_region_count() -> int:
+    if _terrain != null and _terrain.has_method("get_loaded_chunk_count"):
+        return int(_terrain.get_loaded_chunk_count())
+    return 0
+
+
+func get_world_features() -> Node3D:
+    return _features
 
 func _build_environment() -> void:
     _world_env = WorldEnvironment.new()
@@ -132,17 +168,83 @@ func _build_environment() -> void:
     _fireflies.position = Vector3(0.0, 5.0, 0.0)
     add_child(_fireflies)
 
+## Prefers the Terrain3D clipmap and falls back to the streamed placeholder
+## mesh when the addon is unavailable for the running engine build.
 func _setup_terrain() -> void:
-    _terrain_generator = TERRAIN_GENERATOR_SCRIPT.new()
-    _terrain_generator.name = "TerrainGenerator"
-    add_child(_terrain_generator)
-    _terrain_generator.setup(_rng.randi())
+    if TERRAIN3D_WORLD_SCRIPT.is_supported():
+        _terrain3d = TERRAIN3D_WORLD_SCRIPT.new()
+        _terrain3d.name = "Terrain3DWorld"
+        add_child(_terrain3d)
+        _terrain = _terrain3d
+        _terrain3d.start(_world_seed)
+        return
+
+    _terrain = TERRAIN_GENERATOR_SCRIPT.new()
+    _terrain.name = "TerrainGenerator"
+    add_child(_terrain)
+    _terrain.setup(_world_seed)
+
+
+## Terrain3D builds its clipmap over several frames; wait for it, then dress the
+## map with the forests, the lake, the village and the cave.
+func _watch_terrain() -> void:
+    if _terrain == null:
+        return
+    while not _terrain.is_ready():
+        if not is_inside_tree():
+            return
+        await get_tree().process_frame
+    await _on_terrain_ready()
+
+
+func _on_terrain_ready() -> void:
+    _terrain_ready = true
+    if _terrain3d != null and _camera != null:
+        _terrain3d.set_camera(_camera)
+    _features = WORLD_FEATURES_SCRIPT.new()
+    _features.name = "WorldFeatures"
+    add_child(_features)
+    _features.build(_terrain.field, _world_seed, _terrain)
+    _reseat_actors()
+    _release_actors()
+    EventBus.combat_log.emit(LocaleData.text("world_map_ready") + "  ·  " + get_terrain_backend_name())
+    if _terrain3d == null:
+        EventBus.combat_log.emit(LocaleData.text("world_terrain_fallback"))
+
+
+## Drops everything that spawned before the terrain existed back onto it.
+func _reseat_actors() -> void:
+    if player != null:
+        player.global_position = Vector3(
+            player.global_position.x,
+            _sample_ground_height(player.global_position.x, player.global_position.z) + 0.25,
+            player.global_position.z)
+        if player is CharacterBody3D:
+            (player as CharacterBody3D).velocity = Vector3.ZERO
+    for node in get_tree().get_nodes_in_group("npcs"):
+        if node is Node3D:
+            var npc := node as Node3D
+            npc.global_position.y = _sample_ground_height(npc.global_position.x, npc.global_position.z)
+    for node in get_tree().get_nodes_in_group("enemies"):
+        if node is Node3D:
+            var mob := node as Node3D
+            mob.global_position.y = _sample_ground_height(mob.global_position.x, mob.global_position.z) + 0.2
+
+
+## Actors spawned during loading sit out the wait so they cannot fall through a
+## world that has not finished streaming its collision yet.
+func _release_actors() -> void:
+    if player != null:
+        player.set_physics_process(true)
+    for node in get_tree().get_nodes_in_group("enemies"):
+        if node is CollisionObject3D:
+            (node as CollisionObject3D).set_physics_process(true)
 
 
 func _sample_ground_height(x: float, z: float) -> float:
-    if _terrain_generator == null:
+    if _terrain == null:
         return 0.0
-    return float(_terrain_generator.sample_height(x, z))
+    return float(_terrain.sample_height(x, z))
 
 
 func _build_ground() -> void:
@@ -150,110 +252,22 @@ func _build_ground() -> void:
     # original central dirt path remains as a cheap landmark for the flat
     # starting area.
     var path := MeshInstance3D.new()
+    path.name = "StartPath"
     var path_mesh := PlaneMesh.new()
-    path_mesh.size = Vector2(8.0, 120.0)
+    path_mesh.size = Vector2(6.0, 74.0)
     path.mesh = path_mesh
     var path_material := StandardMaterial3D.new()
     path_material.albedo_color = Color(0.44, 0.37, 0.28)
     path_material.roughness = 1.0
     path.material_override = path_material
-    path.position = Vector3(0.0, 0.005, 0.0)
+    path.position = Vector3(0.0, _sample_ground_height(0.0, 0.0) + 0.03, 0.0)
     add_child(path)
-
-func _build_props() -> void:
-    for i in range(90):
-        var angle := _rng.randf_range(0.0, TAU)
-        var radius := _rng.randf_range(8.0, 78.0)
-        var prop_position := Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
-        if prop_position.length() < 8.0:
-            continue
-        if i % 4 == 0:
-            _add_tree(prop_position)
-        elif i % 4 == 1:
-            _add_rock(prop_position)
-        else:
-            _add_grass(prop_position)
-    for i in range(26):
-        var angle := _rng.randf_range(0.0, TAU)
-        var radius := _rng.randf_range(92.0, 122.0)
-        var mountain_position := Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
-        _add_mountain(mountain_position)
-
-func _add_tree(position: Vector3) -> void:
-    position.y = _sample_ground_height(position.x, position.z)
-    var trunk := MeshInstance3D.new()
-    var trunk_mesh := CylinderMesh.new()
-    trunk_mesh.top_radius = 0.22
-    trunk_mesh.bottom_radius = 0.36
-    trunk_mesh.height = _rng.randf_range(2.2, 3.2)
-    trunk.mesh = trunk_mesh
-    var trunk_material := StandardMaterial3D.new()
-    trunk_material.albedo_color = Color(0.32, 0.22, 0.14)
-    trunk.material_override = trunk_material
-    trunk.position = position + Vector3(0.0, trunk_mesh.height * 0.5, 0.0)
-    add_child(trunk)
-
-    var canopy := MeshInstance3D.new()
-    var canopy_mesh := SphereMesh.new()
-    canopy_mesh.radius = _rng.randf_range(1.2, 2.1)
-    canopy_mesh.height = canopy_mesh.radius * 2.0
-    canopy.mesh = canopy_mesh
-    var canopy_material := StandardMaterial3D.new()
-    canopy_material.albedo_color = Color(0.20 + _rng.randf() * 0.10, 0.44 + _rng.randf() * 0.16, 0.22)
-    canopy.material_override = canopy_material
-    canopy.position = position + Vector3(0.0, trunk_mesh.height + canopy_mesh.radius * 0.65, 0.0)
-    add_child(canopy)
-
-func _add_rock(position: Vector3) -> void:
-    position.y = _sample_ground_height(position.x, position.z)
-    var rock := MeshInstance3D.new()
-    var rock_mesh := BoxMesh.new()
-    var size := Vector3(_rng.randf_range(0.5, 2.1), _rng.randf_range(0.35, 1.25), _rng.randf_range(0.5, 2.1))
-    rock_mesh.size = size
-    rock.mesh = rock_mesh
-    var material := StandardMaterial3D.new()
-    material.albedo_color = Color(0.34, 0.38, 0.34)
-    material.roughness = 0.95
-    rock.material_override = material
-    rock.position = position + Vector3(0.0, size.y * 0.5, 0.0)
-    rock.rotation_degrees = Vector3(_rng.randf_range(-8.0, 8.0), _rng.randf_range(0.0, 360.0), _rng.randf_range(-8.0, 8.0))
-    add_child(rock)
-
-func _add_grass(position: Vector3) -> void:
-    position.y = _sample_ground_height(position.x, position.z)
-    var grass := MeshInstance3D.new()
-    var quad := QuadMesh.new()
-    quad.size = Vector2(_rng.randf_range(0.35, 0.65), _rng.randf_range(0.5, 0.9))
-    grass.mesh = quad
-    var material := StandardMaterial3D.new()
-    material.albedo_color = Color(0.21 + _rng.randf() * 0.09, 0.38 + _rng.randf() * 0.15, 0.22)
-    material.cull_mode = BaseMaterial3D.CULL_DISABLED
-    material.roughness = 1.0
-    grass.material_override = material
-    grass.position = position + Vector3(0.0, quad.size.y * 0.5, 0.0)
-    grass.rotation_degrees.y = _rng.randf_range(0.0, 360.0)
-    add_child(grass)
-
-func _add_mountain(position: Vector3) -> void:
-    position.y = _sample_ground_height(position.x, position.z)
-    var mountain := MeshInstance3D.new()
-    var mesh := CylinderMesh.new()
-    mesh.top_radius = 0.0
-    mesh.bottom_radius = _rng.randf_range(9.0, 18.0)
-    mesh.height = _rng.randf_range(24.0, 46.0)
-    mountain.mesh = mesh
-    var material := StandardMaterial3D.new()
-    material.albedo_color = Color(0.24, 0.29, 0.31)
-    material.roughness = 1.0
-    mountain.material_override = material
-    mountain.position = position + Vector3(0.0, mesh.height * 0.5 - 4.0, 0.0)
-    mountain.rotation_degrees.y = _rng.randf_range(0.0, 360.0)
-    add_child(mountain)
 
 func _spawn_player() -> void:
     player = Player.new()
     player.position = Vector3(0.0, _sample_ground_height(0.0, 0.0), 0.0)
     add_child(player)
+    player.set_physics_process(false)
 
 func _spawn_npcs() -> void:
     for npc_id in GameData.NPCS.keys():
@@ -277,18 +291,21 @@ func _spawn_enemy() -> void:
     var z := sin(angle) * radius
     var enemy := Enemy.new()
     enemy.setup(GameData.random_enemy_id(GameState.realm_index, _rng), _rng)
-    enemy.position = Vector3(x, _sample_ground_height(x, z), z)
+    enemy.position = Vector3(x, _sample_ground_height(x, z) + 0.2, z)
     add_child(enemy)
+    enemy.set_physics_process(_terrain_ready)
 
 func _build_camera() -> void:
     _camera = Camera3D.new()
     _camera.fov = float(GameState.settings.get("camera_fov", 55.0))
     _camera.current = true
     add_child(_camera)
+    if _terrain3d != null:
+        _terrain3d.set_camera(_camera)
 
 func _process(delta: float) -> void:
-    if player != null and _terrain_generator != null:
-        _terrain_generator.update_stream(player.global_position)
+    if player != null and _terrain != null:
+        _terrain.update_stream(player.global_position)
     _spawn_timer -= delta
     if _spawn_timer <= 0.0:
         _spawn_timer = 24.0

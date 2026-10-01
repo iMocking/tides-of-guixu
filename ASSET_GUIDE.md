@@ -16,7 +16,12 @@
 
 ## 建议目录结构
 - `assets/models/characters/`：玩家、NPC、敌人模型与动画。
-- `assets/models/environment/`：地形、树木、岩石、建筑、山门。
+- `assets/models/vegetation/`：植被与岩石模型资源（`trees/`、`plants/`、`rocks/`、`wood/`）。
+  - 当前是 **Quaternius《Nature Pack》（CC0）**，见 `CREDITS.md`；由 `PropModels` 加载合并、
+    `WorldFeatures` 散布成 `MultiMeshInstance3D`。要换素材，把同名的 `.glb` 覆盖进对应子目录即可，
+    散布逻辑、尺寸归一（`h` 字段）与地面吸附都不用动。
+  - 地形用 **Terrain3D** 裁剪图 + 噪声贴图（见 `scripts/world/`）；古风建筑仍用
+    `AncientArchitecture` 图元拼装，换成正式模型时保留「返回 Node3D、原点在地面」的约定即可。
 - `assets/models/weapons/`：剑、法宝、武器挂点模型。
 - `assets/models/fashion/`：时装挂件（头冠、披风、腰封、护肩、法珠、背光）。
 - `assets/textures/`：角色贴图、环境贴图、UI 图标。
@@ -58,6 +63,19 @@
 4. 用 StandardMaterial3D 或 ORM 材质替换占位颜色。
 5. 把程序化音效替换为 AudioStreamPlayer 与音频文件。
 6. 用九宫格 StyleBox 和图标替换 ThemeBuilder 的纯色样式。
+
+## 地形与地标（Terrain3D）
+
+- 世界地图由 **Terrain3D v1.0.2-stable**（`addons/terrain_3d/`，MIT）运行时生成，没有导入任何高度图或贴图文件：
+  - `scripts/world/terrain_data.gd` 是唯一的地形场（噪声栈 + 生物群系 + 地标平台），
+    `Terrain3DWorld` 与兜底的 `TerrainGenerator` 都读它
+  - 8 层地表的 albedo / normal 由 `NoiseTexture2D` 现场生成；想换成正式 PBR 贴图时，
+    把 `Terrain3DTextureAsset.albedo_texture` / `normal_texture` 指到 `assets/textures/terrain/` 下的文件即可
+    （albedo 的 A 通道放高度、normal 的 A 通道放粗糙度，8 张贴图尺寸与格式必须一致）
+  - 湖面是一个程序化 `ShaderMaterial` 平面；要换成水体插件时替换 `WorldFeatures._build_lake()`
+- 建筑构件在 `scripts/world/ancient_architecture.gd`，全部用 Godot 图元拼装；
+  换成正式模型时保留各 builder 的「返回 Node3D、原点在地面」约定即可
+- 地标锚点集中在 `TerrainData.LANDMARKS` / `TerrainData.PADS`，改坐标只需改这两处
 
 ## 版权提醒
 只下载授权允许在商业项目中使用的资源，并在 `CREDITS.md` 中记录作者、来源和许可证。

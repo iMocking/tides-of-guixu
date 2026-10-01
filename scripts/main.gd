@@ -60,8 +60,17 @@ func _enter_world() -> void:
     var world := GameWorld.new()
     world.name = "GameWorld"
     add_child(world)
-    await get_tree().process_frame
-    loading.set_progress(0.65, LocaleData.text("loading_entities"))
+    # Terrain3D generates its clipmap a region per frame, so the loading bar is
+    # driven by the world's own progress instead of a fixed frame budget.
+    loading.set_progress(0.42, LocaleData.text("loading_world"))
+    var waited := 0
+    while not world.is_world_ready() and waited < 3600:
+        await get_tree().process_frame
+        waited += 1
+        if waited % 3 == 0:
+            loading.set_progress(lerpf(0.42, 0.90, world.get_load_progress()), LocaleData.text("loading_world"))
+
+    loading.set_progress(0.90, LocaleData.text("loading_entities"))
     await get_tree().process_frame
 
     var ui := GameUI.new()
@@ -70,12 +79,12 @@ func _enter_world() -> void:
     await get_tree().process_frame
     ui.set_player(world.get_player())
 
-    var waited := 0
-    while (not world.is_world_ready() or get_tree().get_nodes_in_group("enemies").size() < GameWorld.INITIAL_ENEMY_COUNT) and waited < 180:
+    var enemy_wait := 0
+    while get_tree().get_nodes_in_group("enemies").size() < GameWorld.INITIAL_ENEMY_COUNT and enemy_wait < 600:
         await get_tree().process_frame
-        waited += 1
+        enemy_wait += 1
 
-    loading.set_progress(0.90, LocaleData.text("loading_finalize"))
+    loading.set_progress(0.96, LocaleData.text("loading_finalize"))
     await get_tree().process_frame
     loading.set_progress(1.0, LocaleData.text("loading_ready"))
     await get_tree().create_timer(0.12).timeout
